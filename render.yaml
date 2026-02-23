@@ -17,11 +17,9 @@ services:
         fromService:
           type: redis
           name: airman-redis
-          property: host
-
+          property: connectionString
       - key: REDIS_PORT
         value: 6379
-
       - key: JWT_PUBLIC_KEY
         value: super-secret-key
 
