@@ -17,8 +17,15 @@
     "strictBindCallApply": true,
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true,
+    "esModuleInterop": true,
     "paths": {
-      "@/*": ["src/*"]
-    }
+      "@/*": [
+        "src/*"
+      ]
+    },
+    "typeRoots": [
+      "./node_modules/@types",
+      "./node_modules"
+    ]
   }
 }
