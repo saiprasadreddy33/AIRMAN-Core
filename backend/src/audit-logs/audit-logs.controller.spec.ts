@@ -26,7 +26,7 @@ describe('AuditLogsController', () => {
   });
 
   it('should call findAll with correct tenant and pagination', async () => {
-    const req = { user: { tenant_id: 'tenant-1' } };
+    const req: { user: { tenant_id: string } } = { user: { tenant_id: 'tenant-1' } };
     const result = await controller.findAll(req, 1, 20);
     expect(result).toEqual({ data: [], total: 0, page: 1, limit: 20 });
   });

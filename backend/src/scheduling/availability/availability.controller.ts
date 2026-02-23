@@ -43,12 +43,12 @@ export class AvailabilityController {
   @Get('instructor/:instructorId')
   @Roles('admin', 'instructor', 'student')
   byInstructor(
-    @Param('instructorId') instructorId: string,
+    @Param('instructorId') _instructorId: string,
     @Req() req: { user: { tenant_id: string } },
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
   ) {
-    return this.availability.findByInstructor(req.user.tenant_id, instructorId, page, limit);
+    return this.availability.findByInstructor(req.user.tenant_id, _instructorId, page, limit);
   }
 
   @Patch(':id')
@@ -58,7 +58,7 @@ export class AvailabilityController {
     @Body() dto: UpdateAvailabilityDto,
     @Req() req: { user: { tenant_id: string } },
   ) {
-    const updateData: any = {};
+    const updateData: { start_time?: Date; end_time?: Date } = {};
 
     if (dto.start_time) {
       const startTime = new Date(dto.start_time);
