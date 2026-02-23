@@ -30,9 +30,9 @@ databases:
   - name: airman-db
     plan: free
 
-# -------------------------------
-# Redis Instance
-# -------------------------------
-redis:
-  - name: airman-redis
+  # -------------------------------
+  # Redis Instance
+  # -------------------------------
+  - type: redis
+    name: airman-redis
     plan: free
