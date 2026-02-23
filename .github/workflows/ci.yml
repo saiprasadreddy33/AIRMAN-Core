@@ -1,13 +1,72 @@
-name: AIRMAN Level-2 CI Pipeline
+name: AIRMAN CI/CD Pipeline
 
 on:
   push:
-    branches: [ main ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main ]
+    branches: [main, develop]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# JOB 1 (parallel): Backend Quality — Lint + Unit Tests + Coverage Gate + Build
+# ──────────────────────────────────────────────────────────────────────────────
 jobs:
-  test-and-build:
+  backend-quality:
+    name: "Backend — Lint, Tests & Coverage Gate"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Generate Prisma client
+        working-directory: ./backend
+        run: npx prisma generate
+
+      - name: Lint backend (zero tolerance)
+        working-directory: ./backend
+        run: npm run lint
+
+      - name: Run unit tests with coverage
+        working-directory: ./backend
+        run: npm run test:cov
+        # Quality gate: jest.config.js coverageThreshold enforces ≥40% coverage
+        # If threshold not met, this step exits non-zero → job fails
+
+      - name: Build backend artifact
+        working-directory: ./backend
+        run: npm run build
+
+      - name: Upload backend coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage
+          path: backend/coverage/
+          retention-days: 14
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # JOB 2 (parallel): Backend Integration — Real DB + Redis + E2E Tests
+  # ──────────────────────────────────────────────────────────────────────────────
+  backend-integration:
+    name: "Backend — Integration Tests (DB + Redis)"
     runs-on: ubuntu-latest
 
     services:
@@ -24,56 +83,212 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
       redis:
         image: redis:7-alpine
         ports:
           - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://airman:airman@localhost:5432/airman?schema=public
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      JWT_SECRET: ci-test-secret-not-for-prod
+      JWT_ACCESS_EXPIRES_SEC: 900
+      JWT_REFRESH_EXPIRES_DAYS: 7
+      NODE_ENV: test
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
 
-      # BACKEND PIPELINE
-      - name: Install Backend Deps
+      - name: Install backend dependencies
         working-directory: ./backend
         run: npm ci
 
-      - name: Run Prisma Migrations Verification
-        working-directory: ./backend
-        env:
-          DATABASE_URL: postgresql://airman:airman@localhost:5432/airman?schema=public
-        run: npx prisma migrate deploy
-
-      - name: Generate Prisma Client
+      - name: Generate Prisma client
         working-directory: ./backend
         run: npx prisma generate
 
-      - name: Run Backend Lint
+      - name: ✅ Run DB migrations
         working-directory: ./backend
-        run: npm run lint --if-present || true
+        run: npx prisma migrate deploy
+        # Quality gate: if any migration fails, the entire job fails
 
-      - name: Run Backend Unit Tests (with Mocked Coverage Gate)
+      - name: Run integration (e2e) tests
         working-directory: ./backend
-        run: npm run test
+        run: npm run test:e2e
 
-      - name: Build Backend Artifacts
-        working-directory: ./backend
-        run: npm run build
+  # ──────────────────────────────────────────────────────────────────────────────
+  # JOB 3 (parallel): Frontend Quality — Lint + Tests + Coverage Gate + Build
+  # ──────────────────────────────────────────────────────────────────────────────
+  frontend-quality:
+    name: "Frontend — Lint, Tests & Coverage Gate"
+    runs-on: ubuntu-latest
 
-      # FRONTEND PIPELINE
-      - name: Install Frontend Deps
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
         working-directory: ./frontend
         run: npm ci
 
-      - name: Run Frontend Lint
+      - name: Lint frontend
         working-directory: ./frontend
-        run: npm run lint --if-present || true
+        run: npm run lint
 
-      - name: Build Frontend Artifacts
+      - name: Run frontend unit tests with coverage
+        working-directory: ./frontend
+        run: npx vitest run --coverage
+        # Quality gate: vitest.config.ts thresholds enforce ≥40% coverage
+
+      - name: Build frontend artifact (Next.js)
         working-directory: ./frontend
         run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:3001
+
+      - name: Upload frontend coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/
+          retention-days: 14
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # STAGE: Auto-comment PR with results summary
+  # ──────────────────────────────────────────────────────────────────────────────
+  pr-comment:
+    name: "Post PR Summary"
+    runs-on: ubuntu-latest
+    needs: [backend-quality, backend-integration, frontend-quality]
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Comment on PR with quality gate results
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const jobs = [
+              { name: 'Backend Unit Tests + Coverage Gate', status: '${{ needs.backend-quality.result }}' },
+              { name: 'Backend Integration Tests (DB + Redis)', status: '${{ needs.backend-integration.result }}' },
+              { name: 'Frontend Tests + Coverage Gate + Build', status: '${{ needs.frontend-quality.result }}' },
+            ];
+            const emoji = (s) => s === 'success' ? '✅' : s === 'failure' ? '❌' : '⚠️';
+            const allPassed = jobs.every(j => j.status === 'success');
+            const rows = jobs.map(j => `| ${emoji(j.status)} ${j.name} | \`${j.status}\` |`).join('\n');
+            const body = [
+              allPassed ? '## ✅ All quality gates passed!' : '## ❌ One or more quality gates failed',
+              '',
+              '| Check | Status |',
+              '|-------|--------|',
+              rows,
+              '',
+              allPassed
+                ? '> This PR is ready for review. Coverage thresholds and lint rules all passed.'
+                : '> Fix the failing checks before merging.',
+            ].join('\n');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # STAGE: Deploy to Dev — runs only on push to develop (after all 3 quality jobs)
+  # ──────────────────────────────────────────────────────────────────────────────
+  deploy-dev:
+    name: "Deploy → Dev"
+    runs-on: ubuntu-latest
+    needs: [backend-quality, backend-integration, frontend-quality]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    environment: dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push API image (dev)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:dev,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push frontend image (dev)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:dev,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # STAGE: Deploy to Staging — runs only on push to main (after dev deploy passes)
+  # Requires: all quality gates + successful dev deploy
+  # ──────────────────────────────────────────────────────────────────────────────
+  deploy-staging:
+    name: "Deploy → Staging"
+    runs-on: ubuntu-latest
+    needs: [backend-quality, backend-integration, frontend-quality]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: staging
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push API image (staging)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:staging,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push frontend image (staging)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:staging,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

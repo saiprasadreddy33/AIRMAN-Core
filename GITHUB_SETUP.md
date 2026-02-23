@@ -205,7 +205,7 @@ brew install act
 # Run dev workflow
 act push --job build-and-test -P ubuntu-latest=-self-hosted
 
-# Run staging workflow  
+# Run staging workflow
 act push --job deploy-staging -P ubuntu-latest=-self-hosted
 ```
 
