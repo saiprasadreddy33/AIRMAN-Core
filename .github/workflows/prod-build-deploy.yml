@@ -1,0 +1,154 @@
+name: Production - Build, Test & Deploy
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  PROD_ENVIRONMENT: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Lint backend
+        working-directory: ./backend
+        run: npm run lint
+
+      - name: Build backend
+        working-directory: ./backend
+        run: npm run build
+
+      - name: Test backend
+        working-directory: ./backend
+        run: npm run test
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=branch
+            type=sha
+
+      - name: Build and push Docker images (Production)
+        run: |
+          docker-compose -f docker-compose.prod.yml build
+          docker tag airman-core-api:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:latest
+          docker tag airman-core-api:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:prod
+          docker tag airman-core-frontend:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:latest
+          docker tag airman-core-frontend:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:prod
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:latest
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:prod
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:latest
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:prod
+
+  deploy-production:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Production
+        env:
+          PROD_DEPLOY_KEY: ${{ secrets.PROD_DEPLOY_KEY }}
+          PROD_SERVER: ${{ secrets.PROD_SERVER }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$PROD_DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H $PROD_SERVER >> ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key root@$PROD_SERVER 'cd /app && docker-compose -f docker-compose.prod.yml pull && docker-compose -f docker-compose.prod.yml up -d'
+
+      - name: Run health checks
+        env:
+          PROD_SERVER: ${{ secrets.PROD_SERVER }}
+        run: |
+          sleep 15
+          curl -f https://$PROD_SERVER/api/health || exit 1
+          curl -f https://$PROD_SERVER || exit 1
+
+      - name: Run smoke tests
+        env:
+          API_URL: https://${{ secrets.PROD_SERVER }}
+        run: |
+          npm install axios
+          npx ts-node tests/smoke-tests.ts
+
+      - name: Notify Slack (Success)
+        if: success()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "🚀 Production deployment successful",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Production Deployment Successful*\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}\nVersion: ${{ github.ref }}"
+                  }
+                }
+              ]
+            }
+
+      - name: Notify Slack (Failure)
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "❌ Production deployment failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Production Deployment FAILED*\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}"
+                  }
+                }
+              ]
+            }

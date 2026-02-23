@@ -1,0 +1,80 @@
+name: Dev - Build & Test
+
+on:
+  push:
+    branches: [ develop ]
+  pull_request:
+    branches: [ develop ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Lint backend
+        working-directory: ./backend
+        run: npm run lint
+
+      - name: Build backend
+        working-directory: ./backend
+        run: npm run build
+
+      - name: Test backend
+        working-directory: ./backend
+        run: npm run test
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build
+
+      - name: Log in to Container Registry
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker images (Dev)
+        if: github.event_name == 'push'
+        run: |
+          docker-compose -f docker-compose.dev.yml build
+          docker tag airman-core-api:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:dev
+          docker tag airman-core-frontend:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:dev
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:dev
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:dev
+
+      - name: Comment PR with test results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ Pre-deployment checks passed!\n- Linting: OK\n- Build: OK\n- Tests: OK'
+            })

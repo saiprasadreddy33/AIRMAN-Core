@@ -1,0 +1,111 @@
+version: '3.9'
+
+services:
+  # ── PostgreSQL (Production) ─────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_INITDB_ARGS: "-c max_connections=100 -c shared_buffers=256MB"
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+      - ./backups/prod:/backups
+    restart: always
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # ── Redis (Production) ──────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD} --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data_prod:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    restart: always
+
+  # ── API (NestJS) - Production ───────────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    env_file:
+      - .env.prod
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: "${REDIS_PORT}"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      RUN_DB_SEED: "false"
+      LOG_LEVEL: warn
+      NODE_ENV: production
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:3001/health" ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ── Frontend (Next.js) - Production ─────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: always
+    env_file:
+      - .env.prod
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # ── Worker (BullMQ) - Production ────────────────────────────────────────────
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    env_file:
+      - .env.prod
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: "${REDIS_PORT}"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      RUN_DB_SEED: "false"
+      WORKER_MODE: "true"
+      LOG_LEVEL: warn
+      NODE_ENV: production
+    entrypoint: /bin/sh -c "npm run start:worker"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data_prod:
+    driver: local
+  redis_data_prod:
+    driver: local

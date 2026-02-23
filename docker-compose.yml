@@ -1,0 +1,84 @@
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: airman
+      POSTGRES_PASSWORD: airman
+      POSTGRES_DB: airman
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U airman -d airman" ]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # ── API (NestJS) ────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://airman:airman@postgres:5432/airman?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      RUN_DB_SEED: "true"
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Worker (BullMQ consumer – same built image as API) ──────────────────────
+  worker:
+    build:
+      context: ./backend
+    command: sh -c "npx prisma migrate deploy && node dist/src/main.js"
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://airman:airman@postgres:5432/airman?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    depends_on:
+      - postgres
+      - redis
+
+  # ── Frontend (NextJS) ───────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://api:3001
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:

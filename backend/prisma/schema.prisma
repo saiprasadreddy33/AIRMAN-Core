@@ -1,0 +1,225 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenant_id String   @unique @map("tenant_id") @db.Uuid
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users User[]
+  roles Role[]
+
+  instructorAvailabilities InstructorAvailability[]
+  bookings                 Booking[]
+
+  courses          Course[]
+  learningModules  LearningModule[]
+  lessons          Lesson[]
+  quizQuestions    QuizQuestion[]
+  quizAttempts     QuizAttempt[]
+
+  @@index([tenant_id])
+}
+
+model Role {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenant_id String   @map("tenant_id") @db.Uuid
+  name      String   // admin | instructor | student
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  users  User[]
+
+  @@unique([tenant_id, name])
+  @@index([tenant_id])
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenant_id    String   @map("tenant_id") @db.Uuid
+  roleId       String   @map("role_id") @db.Uuid
+  email        String
+  passwordHash String   @map("password_hash")
+  name         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  refreshTokens RefreshToken[]
+
+  instructorAvailability InstructorAvailability[]
+  instructorBookings     Booking[]              @relation("InstructorBookings")
+  studentBookings        Booking[]              @relation("StudentBookings")
+
+  quizAttempts           QuizAttempt[]
+
+  @@unique([tenant_id, email])
+  @@index([tenant_id])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+model InstructorAvailability {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenant_id    String   @map("tenant_id") @db.Uuid
+  instructor_id String   @map("instructor_id") @db.Uuid
+  start_time   DateTime @map("start_time")
+  end_time     DateTime @map("end_time")
+
+  tenant     Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  instructor User   @relation(fields: [instructor_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id])
+  @@index([instructor_id])
+}
+
+model Booking {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenant_id    String    @map("tenant_id") @db.Uuid
+  instructor_id String   @map("instructor_id") @db.Uuid
+  student_id   String    @map("student_id") @db.Uuid
+  start_time   DateTime  @map("start_time")
+  end_time     DateTime  @map("end_time")
+  status               String
+  escalation_required   Boolean  @default(false) @map("escalation_required")
+  requested_at DateTime  @map("requested_at")
+  approved_at  DateTime? @map("approved_at")
+  assigned_at  DateTime? @map("assigned_at")
+  completed_at DateTime? @map("completed_at")
+  cancelled_at DateTime? @map("cancelled_at")
+
+  tenant     Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  instructor User   @relation("InstructorBookings", fields: [instructor_id], references: [id], onDelete: Cascade)
+  student    User   @relation("StudentBookings", fields: [student_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id])
+  @@index([instructor_id])
+  @@index([student_id])
+}
+
+model AuditLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenant_id      String   @map("tenant_id") @db.Uuid
+  user_id        String   @map("user_id") @db.Uuid
+  action         String
+  entity_type    String
+  entity_id      String   @map("entity_id") @db.Uuid
+  before_state   Json?    @map("before_state")
+  after_state    Json?    @map("after_state")
+  correlation_id String   @map("correlation_id")
+  created_at     DateTime @default(now()) @map("created_at")
+
+  @@index([tenant_id])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Maverick-lite Learning Module (Level 1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum LessonType {
+  TEXT
+  MCQ
+}
+
+model Course {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenant_id   String   @map("tenant_id") @db.Uuid
+  title       String
+  description String
+  created_at  DateTime @default(now()) @map("created_at")
+
+  tenant      Tenant           @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  modules     LearningModule[]
+
+  @@index([tenant_id])
+}
+
+model LearningModule {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenant_id  String   @map("tenant_id") @db.Uuid
+  course_id  String   @map("course_id") @db.Uuid
+  title      String
+  created_at DateTime @default(now()) @map("created_at")
+
+  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  course     Course   @relation(fields: [course_id], references: [id], onDelete: Cascade)
+  lessons    Lesson[]
+
+  @@index([tenant_id])
+  @@index([course_id])
+}
+
+model Lesson {
+  id         String     @id @default(uuid()) @db.Uuid
+  tenant_id  String     @map("tenant_id") @db.Uuid
+  module_id  String     @map("module_id") @db.Uuid
+  title      String
+  type       LessonType
+  content    String     @db.Text
+  created_at DateTime   @default(now()) @map("created_at")
+
+  tenant     Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  module     LearningModule @relation(fields: [module_id], references: [id], onDelete: Cascade)
+  questions  QuizQuestion[]
+  attempts   QuizAttempt[]
+
+  @@index([tenant_id])
+  @@index([module_id])
+}
+
+model QuizQuestion {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenant_id      String   @map("tenant_id") @db.Uuid
+  lesson_id      String   @map("lesson_id") @db.Uuid
+  question       String   @db.Text
+  options        Json
+  correct_option Int      @map("correct_option")
+  created_at     DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lesson_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id])
+  @@index([lesson_id])
+}
+
+model QuizAttempt {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenant_id    String   @map("tenant_id") @db.Uuid
+  student_id   String   @map("student_id") @db.Uuid
+  lesson_id    String   @map("lesson_id") @db.Uuid
+  answers      Json
+  score        Int
+  attempted_at DateTime @default(now()) @map("attempted_at")
+
+  tenant  Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  student User   @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  lesson  Lesson @relation(fields: [lesson_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id])
+  @@index([student_id])
+  @@index([lesson_id])
+}
+

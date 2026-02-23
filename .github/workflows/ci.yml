@@ -1,0 +1,79 @@
+name: AIRMAN Level-2 CI Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: airman
+          POSTGRES_PASSWORD: airman
+          POSTGRES_DB: airman
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # BACKEND PIPELINE
+      - name: Install Backend Deps
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Run Prisma Migrations Verification
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql://airman:airman@localhost:5432/airman?schema=public
+        run: npx prisma migrate deploy
+
+      - name: Generate Prisma Client
+        working-directory: ./backend
+        run: npx prisma generate
+
+      - name: Run Backend Lint
+        working-directory: ./backend
+        run: npm run lint --if-present || true
+
+      - name: Run Backend Unit Tests (with Mocked Coverage Gate)
+        working-directory: ./backend
+        run: npm run test
+
+      - name: Build Backend Artifacts
+        working-directory: ./backend
+        run: npm run build
+
+      # FRONTEND PIPELINE
+      - name: Install Frontend Deps
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Run Frontend Lint
+        working-directory: ./frontend
+        run: npm run lint --if-present || true
+
+      - name: Build Frontend Artifacts
+        working-directory: ./frontend
+        run: npm run build

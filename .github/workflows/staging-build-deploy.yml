@@ -1,0 +1,111 @@
+name: Staging - Build, Test & Deploy
+
+on:
+  push:
+    branches: [ staging ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  STAGING_ENVIRONMENT: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Lint backend
+        working-directory: ./backend
+        run: npm run lint
+
+      - name: Build backend
+        working-directory: ./backend
+        run: npm run build
+
+      - name: Test backend
+        working-directory: ./backend
+        run: npm run test
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker images (Staging)
+        run: |
+          docker-compose -f docker-compose.staging.yml build
+          docker tag airman-core-api:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:staging
+          docker tag airman-core-frontend:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:staging
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:staging
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:staging
+
+  deploy-staging:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Staging
+        env:
+          STAGING_DEPLOY_KEY: ${{ secrets.STAGING_DEPLOY_KEY }}
+          STAGING_SERVER: ${{ secrets.STAGING_SERVER }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$STAGING_DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H $STAGING_SERVER >> ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key root@$STAGING_SERVER 'cd /app && docker-compose -f docker-compose.staging.yml pull && docker-compose -f docker-compose.staging.yml up -d'
+
+      - name: Run smoke tests
+        env:
+          STAGING_SERVER: ${{ secrets.STAGING_SERVER }}
+        run: |
+          sleep 10
+          curl -f http://$STAGING_SERVER:3001/health || exit 1
+          curl -f http://$STAGING_SERVER:3000 || exit 1
+
+      - name: Notify Slack (Success)
+        if: success()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "✅ Staging deployment successful",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Staging Deployment Successful*\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}"
+                  }
+                }
+              ]
+            }
