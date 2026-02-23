@@ -36,8 +36,8 @@ export default function LessonPage() {
   const { user } = useAuth();
   const router = useRouter();
 
-  // Offline-first state
-  const offlineQuiz = useOfflineQuiz();
+  // Destructure stable references from the hook — avoids new object reference on every render
+  const { state: offlineState, cacheQuiz, createLocalAttempt, updateLocalAttempt, syncAttempts } = useOfflineQuiz();
   const [localAttemptId, setLocalAttemptId] = useState<string | null>(null);
 
   const [lesson, setLesson] = useState<Lesson | null>(null);
@@ -50,7 +50,6 @@ export default function LessonPage() {
   const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Initialize offline storage and fetch lesson
   useEffect(() => {
     const fetchLesson = async () => {
       try {
@@ -60,7 +59,7 @@ export default function LessonPage() {
 
         // Cache quiz for offline access
         if (data.type === 'MCQ') {
-          await offlineQuiz.cacheQuiz(data);
+          await cacheQuiz(data);
         }
 
         setError(null);
@@ -75,7 +74,8 @@ export default function LessonPage() {
     if (lessonId && user) {
       fetchLesson();
     }
-  }, [lessonId, user, offlineQuiz]);
+  // cacheQuiz is wrapped in useCallback([]) so its reference is stable across renders
+  }, [lessonId, user, cacheQuiz]);
 
   if (loading) {
     return (
@@ -104,7 +104,7 @@ export default function LessonPage() {
       }));
 
       // If online, submit to server immediately
-      if (offlineQuiz.state.isOnline) {
+      if (offlineState.isOnline) {
         const result = await api.post(`/lessons/${lessonId}/attempt`, { answers });
         setQuizResult(result);
         setSubmitted(true);
@@ -112,29 +112,16 @@ export default function LessonPage() {
       } else {
         // If offline, save locally first
         if (!localAttemptId) {
-          const id = await offlineQuiz.createLocalAttempt(lessonId);
+          const id = await createLocalAttempt(lessonId);
           setLocalAttemptId(id);
-          await offlineQuiz.updateLocalAttempt(id, answers, true);
+          await updateLocalAttempt(id, answers, true);
         } else {
-          await offlineQuiz.updateLocalAttempt(localAttemptId, answers, true);
+          await updateLocalAttempt(localAttemptId, answers, true);
         }
 
         // Grade locally using stored quiz data
         const storedQuiz = await import('@/lib/offline-quiz').then(m => m.getStoredQuiz(lessonId));
         if (storedQuiz) {
-          let score = 0;
-          const incorrectQuestions: { questionId: string; correctAnswer: number }[] = [];
-
-          // Create a map of correct answers from stored quiz
-          const questionsData = new Map(
-            storedQuiz.questions.map((q: any, idx: number) => [q.id, { correctIndex: idx }])
-          );
-
-          for (const ans of answers) {
-            // Note: Correct answer is stored on server, so we'll show results after sync
-            score;
-          }
-
           // Show local result (without correctness info - that comes after sync)
           setQuizResult({
             attemptId: localAttemptId || 'local',
@@ -168,7 +155,7 @@ export default function LessonPage() {
 
         {/* Offline Status Indicator */}
         <div className="flex items-center gap-2">
-          {offlineQuiz.state.isOnline ? (
+          {offlineState.isOnline ? (
             <div className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-success/10 text-success">
               <Wifi className="w-3 h-3" />
               Online
@@ -180,18 +167,18 @@ export default function LessonPage() {
             </div>
           )}
 
-          {offlineQuiz.state.pendingAttempts > 0 && (
+          {offlineState.pendingAttempts > 0 && (
             <button
-              onClick={() => offlineQuiz.syncAttempts()}
-              disabled={offlineQuiz.state.syncInProgress}
+              onClick={() => syncAttempts()}
+              disabled={offlineState.syncInProgress}
               className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
             >
-              {offlineQuiz.state.syncInProgress ? (
+              {offlineState.syncInProgress ? (
                 <Loader2 className="w-3 h-3 animate-spin" />
               ) : (
                 <Cloud className="w-3 h-3" />
               )}
-              Sync ({offlineQuiz.state.pendingAttempts})
+              Sync ({offlineState.pendingAttempts})
             </button>
           )}
         </div>
@@ -328,7 +315,7 @@ export default function LessonPage() {
                 animate={{ opacity: 1, y: 0 }}
                 className="glass-card rounded-xl p-6 mt-6 text-center"
               >
-                {!offlineQuiz.state.isOnline && (
+                {!offlineState.isOnline && (
                   <div className="mb-4 p-3 rounded-lg bg-warning/10 text-warning text-xs flex items-center gap-2 justify-center">
                     <WifiOff className="w-3 h-3" />
                     This attempt is saved locally. Results will sync when you're back online.
@@ -341,7 +328,7 @@ export default function LessonPage() {
                 <p className="text-sm text-muted-foreground mb-4">
                   {quizResult.score === quizResult.total
                     ? 'Perfect! You got all questions correct!'
-                    : offlineQuiz.state.isOnline
+                    : offlineState.isOnline
                     ? `${Math.round((quizResult.score / quizResult.total) * 100)}% correct`
                     : 'Answer submitted'}
                 </p>
