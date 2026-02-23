@@ -19,7 +19,7 @@ export class LessonsController {
   }
 
   @Post(':id/attempt')
-  @Roles('admin', 'student')
+  @Roles('admin', 'instructor', 'student')
   async attemptQuiz(
     @Param('id') id: string,
     @Body() dto: { answers: QuizAnswerInput[] },
@@ -38,7 +38,7 @@ export class LessonsController {
    * Handles duplicate detection and validation
    */
   @Post('sync-attempt')
-  @Roles('admin', 'student')
+  @Roles('admin', 'instructor', 'student')
   async syncOfflineAttempt(
     @Body() dto: { lessonId: string; answers: QuizAnswerInput[]; clientId: string },
     @Req() req: { user: { tenant_id: string; user_id: string } },
