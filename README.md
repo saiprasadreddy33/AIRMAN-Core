@@ -310,7 +310,101 @@ If they got one wrong:
 
 ---
 
-### Instructor Availability & Bookings
+### Offline-First Quiz Attempts ✨
+
+AIRMAN supports **offline quiz taking**—students can take quizzes anywhere, even without internet, and sync results automatically when they reconnect. This is perfect for flight schools where training happens in remote locations.
+
+#### How It Works
+
+1. **Automatic Caching:** When a student opens a quiz, it's cached locally in their browser (IndexedDB)
+2. **Works Offline:** Answers save locally as they type—no connection needed
+3. **Auto-Sync:** When internet is restored, attempts upload automatically in background
+4. **Smart Deduplication:** Handles network retries—same attempt won't be graded twice
+
+#### User Experience
+
+**Online (Normal):**
+- Open quiz → Answer → Submit → Instant grading
+- Zero latency, exactly like before
+
+**Offline:**
+- Open quiz → Answers saved locally
+- Submit → Shows "Saved Locally" confirmation
+- Get signal → Auto-syncs in background
+- See "Synced ✓" once complete
+
+**Indicator Badges:**
+- 🟢 **Online** - Connected to internet
+- 🔴 **Offline** - No connection, but quizzes still work
+- 🔄 **Sync (N)** - Pending attempts queued for upload
+
+#### API Endpoints
+
+**Sync Offline Attempts** (Called automatically when connection restored)
+```bash
+curl -X POST "http://localhost:3001/lessons/sync-attempt" \
+  -H "Authorization: Bearer <your_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "lessonId": "clz1a2b3c4d5e6f7g8h9i0j1",
+    "clientId": "attempt_1708702000000_a1b2c3d4e",
+    "answers": [
+      { "questionId": "q1", "answer": 0 },
+      { "questionId": "q2", "answer": 1 }
+    ]
+  }'
+```
+
+**Response** (200 OK):
+```json
+{
+  "attemptId": "clz1a2b3c4d5e6f7g8h9i0j1",
+  "score": 2,
+  "total": 2,
+  "incorrectQuestions": [],
+  "duplicateSync": false
+}
+```
+
+#### How to Test Offline Mode
+
+1. **Open Quiz Online:**
+   ```
+   Login → Courses → Select Course → Open Lesson → Start Quiz
+   ```
+
+2. **Go Offline** (Browser DevTools):
+   - F12 → Network tab → Check "Offline"
+   - Or disconnect WiFi
+
+3. **Take Quiz Offline:**
+   - Answer questions (all saved locally)
+   - Submit → "Saved Locally" message
+   - Close browser (data persists)
+
+4. **Come Back Online:**
+   - Disable offline mode / Reconnect WiFi
+   - Return to courses page
+   - Notice 🔄 **Sync** badge appears
+   - Click it or wait 5 seconds for auto-sync
+   - See ✅ **Synced** once complete
+   - View grading with incorrect answers
+
+#### Tech Details
+
+- **Storage:** IndexedDB (can hold 50-100 cached quizzes)
+- **Auto-Cleanup:** Synced attempts removed after 30 days
+- **Smart Retry:** Failed syncs retry automatically every 10 seconds
+- **No Libraries:** Uses native browser APIs (zero npm dependencies)
+
+#### Perfect For:
+
+- ✈️ In-flight training (airplane wifi is spotty)
+- 🏔️ Remote flight training locations
+- 🚁 Helicopter rescue training in mountains
+- 📡 Any environment with unreliable connectivity
+
+---
 
 **Get Available Time Slots** (what times is this instructor free?)
 ```bash

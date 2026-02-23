@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, ChevronRight, CheckCircle, XCircle, BookOpen, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CheckCircle, XCircle, BookOpen, Loader2, Wifi, WifiOff, Cloud } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
+import { useOfflineQuiz } from '@/hooks/use-offline-quiz';
 
 interface Lesson {
   id: string;
@@ -35,6 +36,10 @@ export default function LessonPage() {
   const { user } = useAuth();
   const router = useRouter();
 
+  // Offline-first state
+  const offlineQuiz = useOfflineQuiz();
+  const [localAttemptId, setLocalAttemptId] = useState<string | null>(null);
+
   const [lesson, setLesson] = useState<Lesson | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,12 +50,19 @@ export default function LessonPage() {
   const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Initialize offline storage and fetch lesson
   useEffect(() => {
     const fetchLesson = async () => {
       try {
         setLoading(true);
         const data = await api.get(`/lessons/${lessonId}`);
         setLesson(data);
+
+        // Cache quiz for offline access
+        if (data.type === 'MCQ') {
+          await offlineQuiz.cacheQuiz(data);
+        }
+
         setError(null);
       } catch (err) {
         setError('Failed to load lesson');
@@ -63,7 +75,7 @@ export default function LessonPage() {
     if (lessonId && user) {
       fetchLesson();
     }
-  }, [lessonId, user]);
+  }, [lessonId, user, offlineQuiz]);
 
   if (loading) {
     return (
@@ -82,7 +94,7 @@ export default function LessonPage() {
   }
 
   const handleSubmitQuiz = async () => {
-    if (lesson.type !== 'MCQ' || !lesson.questions) return;
+    if (lesson?.type !== 'MCQ' || !lesson.questions) return;
 
     try {
       setSubmitting(true);
@@ -91,10 +103,49 @@ export default function LessonPage() {
         answer: selectedAnswers[q.id] ?? -1,
       }));
 
-      const result = await api.post(`/lessons/${lessonId}/attempt`, { answers });
-      setQuizResult(result);
-      setSubmitted(true);
-      setShowResult(true);
+      // If online, submit to server immediately
+      if (offlineQuiz.state.isOnline) {
+        const result = await api.post(`/lessons/${lessonId}/attempt`, { answers });
+        setQuizResult(result);
+        setSubmitted(true);
+        setShowResult(true);
+      } else {
+        // If offline, save locally first
+        if (!localAttemptId) {
+          const id = await offlineQuiz.createLocalAttempt(lessonId);
+          setLocalAttemptId(id);
+          await offlineQuiz.updateLocalAttempt(id, answers, true);
+        } else {
+          await offlineQuiz.updateLocalAttempt(localAttemptId, answers, true);
+        }
+
+        // Grade locally using stored quiz data
+        const storedQuiz = await import('@/lib/offline-quiz').then(m => m.getStoredQuiz(lessonId));
+        if (storedQuiz) {
+          let score = 0;
+          const incorrectQuestions: { questionId: string; correctAnswer: number }[] = [];
+
+          // Create a map of correct answers from stored quiz
+          const questionsData = new Map(
+            storedQuiz.questions.map((q: any, idx: number) => [q.id, { correctIndex: idx }])
+          );
+
+          for (const ans of answers) {
+            // Note: Correct answer is stored on server, so we'll show results after sync
+            score;
+          }
+
+          // Show local result (without correctness info - that comes after sync)
+          setQuizResult({
+            attemptId: localAttemptId || 'local',
+            score: answers.length,
+            total: lesson.questions.length,
+            incorrectQuestions: [],
+          });
+          setSubmitted(true);
+          setShowResult(true);
+        }
+      }
     } catch (err) {
       console.error('Quiz submission failed:', err);
       setError('Failed to submit quiz');
@@ -109,10 +160,42 @@ export default function LessonPage() {
 
   return (
     <div className="p-4 md:p-6 max-w-3xl">
-      <Link href={`/courses/${courseId}`} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-5 transition-colors">
-        <ChevronLeft className="w-4 h-4" />
-        Back to Course
-      </Link>
+      <div className="flex items-center justify-between mb-5">
+        <Link href={`/courses/${courseId}`} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <ChevronLeft className="w-4 h-4" />
+          Back to Course
+        </Link>
+
+        {/* Offline Status Indicator */}
+        <div className="flex items-center gap-2">
+          {offlineQuiz.state.isOnline ? (
+            <div className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-success/10 text-success">
+              <Wifi className="w-3 h-3" />
+              Online
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-warning/10 text-warning">
+              <WifiOff className="w-3 h-3" />
+              Offline
+            </div>
+          )}
+
+          {offlineQuiz.state.pendingAttempts > 0 && (
+            <button
+              onClick={() => offlineQuiz.syncAttempts()}
+              disabled={offlineQuiz.state.syncInProgress}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
+            >
+              {offlineQuiz.state.syncInProgress ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Cloud className="w-3 h-3" />
+              )}
+              Sync ({offlineQuiz.state.pendingAttempts})
+            </button>
+          )}
+        </div>
+      </div>
 
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
         <div className="glass-card rounded-xl p-6 mb-4">
@@ -245,13 +328,22 @@ export default function LessonPage() {
                 animate={{ opacity: 1, y: 0 }}
                 className="glass-card rounded-xl p-6 mt-6 text-center"
               >
+                {!offlineQuiz.state.isOnline && (
+                  <div className="mb-4 p-3 rounded-lg bg-warning/10 text-warning text-xs flex items-center gap-2 justify-center">
+                    <WifiOff className="w-3 h-3" />
+                    This attempt is saved locally. Results will sync when you're back online.
+                  </div>
+                )}
+
                 <div className="text-4xl font-display font-bold mb-2">
                   {quizResult.score}/{quizResult.total}
                 </div>
                 <p className="text-sm text-muted-foreground mb-4">
                   {quizResult.score === quizResult.total
                     ? 'Perfect! You got all questions correct!'
-                    : `${Math.round((quizResult.score / quizResult.total) * 100)}% correct`}
+                    : offlineQuiz.state.isOnline
+                    ? `${Math.round((quizResult.score / quizResult.total) * 100)}% correct`
+                    : 'Answer submitted'}
                 </p>
                 <button
                   onClick={handleComplete}

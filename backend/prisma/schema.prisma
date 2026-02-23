@@ -212,6 +212,9 @@ model QuizAttempt {
   lesson_id    String   @map("lesson_id") @db.Uuid
   answers      Json
   score        Int
+  total        Int      @default(0) // Total questions
+  source       String   @default("online") // 'online' or 'offline'
+  external_id  String?  @map("external_id") // Client ID for offline dedup
   attempted_at DateTime @default(now()) @map("attempted_at")
 
   tenant  Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
@@ -221,5 +224,6 @@ model QuizAttempt {
   @@index([tenant_id])
   @@index([student_id])
   @@index([lesson_id])
+  @@index([source])
 }
 
