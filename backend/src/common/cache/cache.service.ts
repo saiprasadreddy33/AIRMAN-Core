@@ -32,7 +32,8 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     try {
       const raw = await this.client.get(key);
       return raw ? (JSON.parse(raw) as T) : null;
-    } catch (err) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
       this.logger.warn(`Cache GET failed for key "${key}"`, err);
       return null;
     }
@@ -86,7 +87,7 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async invalidateAvailability(tenantId: string, instructorId?: string) {
+  async invalidateAvailability(tenantId: string, _instructorId?: string) {
     try {
       const keys = await this.client.keys(`availability:${tenantId}*`);
       if (keys.length) await this.client.del(...keys);
