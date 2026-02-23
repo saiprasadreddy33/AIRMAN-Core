@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import * as request from 'supertest';
-import * as cookieParser from 'cookie-parser';
+import supertest from 'supertest';
+import cookieParser from 'cookie-parser';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import * as argon2 from 'argon2';
@@ -14,7 +14,6 @@ describe('AIRMAN API (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let adminToken: string;
-  let tenantId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -28,7 +27,7 @@ describe('AIRMAN API (e2e)', () => {
 
     prisma = moduleFixture.get<PrismaService>(PrismaService);
     await seedTestData(prisma);
-  });
+  }, 30000);
 
   afterAll(async () => {
     await cleanupTestData(prisma);
@@ -40,7 +39,7 @@ describe('AIRMAN API (e2e)', () => {
   // ─────────────────────────────────────────────────────────────────────────────
   describe('POST /auth/login', () => {
     it('should reject invalid credentials with 401', async () => {
-      const res = await request(app.getHttpServer())
+      const res = await supertest(app.getHttpServer())
         .post('/auth/login')
         .send({ email: 'wrong@wrong.com', password: 'bad' });
 
@@ -48,13 +47,13 @@ describe('AIRMAN API (e2e)', () => {
     });
 
     it('should return accessToken for valid admin credentials', async () => {
-      const res = await request(app.getHttpServer())
+      const res = await supertest(app.getHttpServer())
         .post('/auth/login')
         .send({ email: 'ci-admin@test.com', password: 'ci-pass-123' });
 
       expect(res.status).toBe(201);
       expect(res.body).toHaveProperty('accessToken');
-      adminToken = res.body.accessToken;
+      adminToken = res.body.accessToken as string;
     });
 
     it('should write an AuditLog entry on successful login', async () => {
@@ -74,7 +73,7 @@ describe('AIRMAN API (e2e)', () => {
   // ─────────────────────────────────────────────────────────────────────────────
   describe('GET /courses', () => {
     it('should return paginated course list', async () => {
-      const res = await request(app.getHttpServer())
+      const res = await supertest(app.getHttpServer())
         .get('/courses?page=1&limit=5')
         .set('Authorization', `Bearer ${adminToken}`);
 
@@ -91,7 +90,7 @@ describe('AIRMAN API (e2e)', () => {
   // ─────────────────────────────────────────────────────────────────────────────
   describe('GET /audit-logs', () => {
     it('should return paginated audit logs for admin', async () => {
-      const res = await request(app.getHttpServer())
+      const res = await supertest(app.getHttpServer())
         .get('/audit-logs?page=1&limit=10')
         .set('Authorization', `Bearer ${adminToken}`);
 
@@ -107,7 +106,7 @@ describe('AIRMAN API (e2e)', () => {
   // ─────────────────────────────────────────────────────────────────────────────
   describe('GET /users', () => {
     it('should return paginated user list', async () => {
-      const res = await request(app.getHttpServer())
+      const res = await supertest(app.getHttpServer())
         .get('/users?page=1&limit=5')
         .set('Authorization', `Bearer ${adminToken}`);
 
@@ -121,15 +120,14 @@ describe('AIRMAN API (e2e)', () => {
   // RATE LIMITING — auth endpoint
   // ─────────────────────────────────────────────────────────────────────────────
   describe('Rate limiting on POST /auth/login', () => {
-    it('should return 429 after 5 rapid failed attempts', async () => {
+    it('should return 429 after rapid failed attempts', async () => {
       const attempts = Array.from({ length: 6 }, () =>
-        request(app.getHttpServer())
+        supertest(app.getHttpServer())
           .post('/auth/login')
           .send({ email: 'x@x.com', password: 'wrong' }),
       );
       const results = await Promise.all(attempts);
-      const statuses = results.map((r) => r.status);
-      // At least one should be 429
+      const statuses = results.map((r) => r.status as number);
       expect(statuses).toContain(429);
     });
   });
@@ -163,8 +161,14 @@ async function seedTestData(prisma: PrismaService) {
 }
 
 async function cleanupTestData(prisma: PrismaService) {
-  await prisma.auditLog.deleteMany({ where: { tenant_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' } }).catch(() => {});
+  await prisma.auditLog.deleteMany({
+    where: { tenant_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' },
+  }).catch(() => {});
   await prisma.user.deleteMany({ where: { email: 'ci-admin@test.com' } }).catch(() => {});
-  await prisma.role.deleteMany({ where: { name: 'admin', tenant_id: { startsWith: 'aaaaaaaa' } } }).catch(() => {});
-  await prisma.tenant.deleteMany({ where: { tenant_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' } }).catch(() => {});
+  await prisma.role.deleteMany({
+    where: { name: 'admin', tenant_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' },
+  }).catch(() => {});
+  await prisma.tenant.deleteMany({
+    where: { tenant_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' },
+  }).catch(() => {});
 }
