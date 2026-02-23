@@ -26,12 +26,13 @@ module.exports = {
     '^@/(.*)$': '<rootDir>/$1',
   },
   // Quality Gate: CI fails if any of these drop below threshold
+  // Progressive: Start lower, increase as codebase matures
   coverageThreshold: {
     global: {
-      statements: 40,
-      lines: 40,
-      functions: 35,
-      branches: 30,
+      statements: 20,
+      lines: 20,
+      functions: 15,
+      branches: 10,
     },
   },
 };

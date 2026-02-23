@@ -123,8 +123,19 @@ jobs:
 
       - name: ✅ Run DB migrations
         working-directory: ./backend
-        run: npx prisma migrate deploy
-        # Quality gate: if any migration fails, the entire job fails
+        run: |
+          # Wait for PostgreSQL to be ready
+          for i in {1..30}; do
+            if pg_isready -h localhost -U airman; then
+              echo "PostgreSQL is ready"
+              break
+            fi
+            echo "Waiting for PostgreSQL... ($i/30)"
+            sleep 1
+          done
+          
+          # Run migrations
+          npx prisma migrate deploy --skip-generate
 
       - name: Run integration (e2e) tests
         working-directory: ./backend
