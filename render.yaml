@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: airman-api
+    env: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: airman-db
+          property: connectionString
+      - key: REDIS_HOST
+        fromService:
+          name: airman-redis
+          type: redis
+          property: host
+      - key: REDIS_PORT
+        value: 6379
+      - key: JWT_PUBLIC_KEY
+        value: your-secret
+
+  - type: worker
+    name: airman-worker
+    env: docker
+    dockerfilePath: ./backend/Dockerfile
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: airman-db
+          property: connectionString
+      - key: REDIS_HOST
+        fromService:
+          name: airman-redis
+          type: redis
+          property: host
+      - key: REDIS_PORT
+        value: 6379
+      - key: JWT_PUBLIC_KEY
+        value: your-secret
+
+databases:
+  - name: airman-db
+    plan: free
+
+redis:
+  - name: airman-redis
+    plan: free
