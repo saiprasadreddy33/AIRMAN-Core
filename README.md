@@ -542,10 +542,23 @@ airman-core/
 └── README.md               # This file
 ```
 
+## 📚 Documentation
+
+Complete documentation is organized in the [`/docs` directory](./docs/):
+
+- **[Getting Started](./docs/setup/)** - Environment setup and GitHub configuration
+- **[Architecture](./docs/architecture/)** - System design, authentication, and interconnections
+- **[Deployment](./docs/deployment/)** - Production deployment and rollback procedures
+- **[Features](./docs/features/)** - Detailed feature implementations (e.g., offline quizzes)
+- **[Security](./docs/security/)** - Secrets management and compliance
+- **[Incidents](./docs/incidents/)** - Post-mortems and intentional cuts
+
+👉 **New here?** Start with [docs/README.md](./docs/README.md) for a complete guide.
+
 ## Key Technical Decisions & Why
 
 ### Data Isolation Over Shared Databases
-Every query filters by `tenant_id`. Yes, it adds a WHERE clause to every query, but it means we'll never accidentally leak School A's data to School B. The safety is worth the small performance cost. See [PLAN.md](./PLAN.md) for the 72-hour breakdown.
+Every query filters by `tenant_id`. Yes, it adds a WHERE clause to every query, but it means we'll never accidentally leak School A's data to School B. The safety is worth the small performance cost. See [System Architecture Plan](./docs/architecture/PLAN.md) for the 72-hour breakdown.
 
 ### Redis for Caching (Not Full Persistence)
 We cache reads (courses, availability) for 5 minutes. We don't cache writes. If an instructor updates availability, it clears cache immediately. Simple >> complex consistency guarantees.
@@ -558,7 +571,7 @@ One repo, one `docker-compose up`. DevOps is free; git clone literally works for
 
 ## What We Didn't Build (And Why)
 
-See [CUTS.md](./CUTS.md) for an honest look at 4 features we intentionally skipped:
+See [Cuts & Intentional Skips](./docs/incidents/CUTS.md) for an honest look at 4 features we intentionally skipped:
 - Full test coverage (time, not hard)
 - Full-text search (unnecessary at MVP scale)
 - Fine-grained access control (roles work fine for now)
@@ -566,7 +579,7 @@ See [CUTS.md](./CUTS.md) for an honest look at 4 features we intentionally skipp
 
 ## Security & Authentication Documentation
 
-See [AUTH-RBAC.md](./AUTH-RBAC.md) for complete verification of:
+See [Authentication & RBAC](./docs/architecture/AUTH-RBAC.md) for complete verification of:
 - ✅ Three roles (Admin, Instructor, Student) with enforced permissions
 - ✅ Argon2 password hashing (industry standard)
 - ✅ JWT + Refresh tokens (15-min access, 30-day refresh)

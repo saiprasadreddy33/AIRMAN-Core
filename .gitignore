@@ -5,8 +5,10 @@
 # 🔐 SECRETS & CREDENTIALS (NEVER COMMIT)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Environment files - only .env.dev is safe to commit
+# Environment files - NEVER commit sensitive data
+# Copy .env.example and configure with your actual values
 .env
+.env.dev
 .env.local
 .env.*.local
 .env.staging
@@ -235,7 +237,6 @@ compliance-report.json
 # 📁 SAFE TO COMMIT
 # ═══════════════════════════════════════════════════════════════════════════════
 
-!.env.dev
 !.env.example
 !.github/
 !.vscode/extensions.json
