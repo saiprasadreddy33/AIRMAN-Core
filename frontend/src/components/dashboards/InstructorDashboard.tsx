@@ -4,6 +4,8 @@ import { User } from '../../types';
 import { StatCard } from '../StatCard';
 import { PageHeader } from '../PageHeader';
 import { BOOKINGS, COURSES, LESSONS } from '../../lib/data';
+import { useState, useEffect } from 'react';
+import { api } from '@/lib/api';
 
 export default function InstructorDashboard({ user }: { user: User }) {
   const myCourses = COURSES.filter(c => c.instructorId === user.id);
@@ -12,6 +14,52 @@ export default function InstructorDashboard({ user }: { user: User }) {
 
   const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.07 } } };
   const item = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } };
+  const [stats, setStats] = useState<any>({
+    totalStudents: 0,
+    activeCourses: 0,
+    pendingBookings: 0,
+    completionRate: 0,
+  });
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+      if (!user?.token) return;
+
+      const fetchStats = async () => {
+        try {
+          const [studentsData, coursesData, bookingsData] = await Promise.all([
+            api.get<any>('/users?limit=1000&role=student'),
+            api.get<any>('/courses?limit=100'),
+            api.get<any>('/bookings?limit=100'),
+          ]);
+
+          const students = (studentsData.data || []).length;
+          const courses = (coursesData.data || []).length;
+          const bookings = (bookingsData.data || []).filter((b: any) => b.status === 'requested').length;
+
+          setStats({
+            totalStudents: students,
+            activeCourses: courses,
+            pendingBookings: bookings,
+            completionRate: Math.round(Math.random() * 30 + 70), // Placeholder
+          });
+        } catch (err) {
+          console.error('Error fetching stats:', err);
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      fetchStats();
+    }, [user]);
+
+    if (!user) return null;
+      const statCards = [
+    { label: 'Total Students', value: stats.totalStudents, change: '+12', icon: Users },
+    { label: 'Active Courses', value: stats.activeCourses, change: '+2', icon: BookOpen },
+    { label: 'Pending Bookings', value: stats.pendingBookings, change: '+0', icon: Calendar },
+    // { label: 'Avg Completion', value: `${stats.completionRate}%`, change: '+4%', icon: TrendingUp },
+  ];
 
   return (
     <div className="p-4 md:p-6">
@@ -28,7 +76,7 @@ export default function InstructorDashboard({ user }: { user: User }) {
           <StatCard title="Upcoming Sessions" value={upcomingBookings.length} icon={Calendar} />
         </motion.div>
         <motion.div variants={item}>
-          <StatCard title="Total Students" value="48" change="+3" positive icon={Users} />
+          <StatCard title="Total Students" value={stats.totalStudents} change="+3" positive icon={Users} />
         </motion.div>
       </motion.div>
 
@@ -83,3 +131,4 @@ export default function InstructorDashboard({ user }: { user: User }) {
     </div>
   );
 }
+// Remove unused mock functions at the end of the file
