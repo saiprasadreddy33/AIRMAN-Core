@@ -1,10 +1,7 @@
 # AIRMAN-Core
 
-Production-ready backend for AIRMAN—a multi-tenant flight instruction booking and learning platform built in 72 hours. This is a complete instructor booking system combined with an interactive online learning module where students can take quizzes and track progress across courses.
+AIRMAN—a multi-tenant flight instruction booking and learning platform built in 72 hours. This is a complete instructor booking system combined with an interactive online learning module where students can take quizzes and track progress across courses.
 
-## Why We Built This
-
-AIRMAN solves a real problem: flight schools need a way to manage instructor availability, students need to book lessons online, and both need a centralized place for training materials and assessments. We built the MVP in 72 hours focusing on what matters most: bookings that work, courses that teach, and data that stays private.
 
 ## Technical Stack
 
