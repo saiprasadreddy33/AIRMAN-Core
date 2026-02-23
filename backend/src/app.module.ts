@@ -12,6 +12,7 @@ import { SchedulingModule } from './scheduling/scheduling.module';
 import { LearningModule } from './learning/learning.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
+import { AuditLogsModule } from './audit-logs/audit-logs.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     TenantsModule,
     SchedulingModule,
     LearningModule,
+    AuditLogsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
