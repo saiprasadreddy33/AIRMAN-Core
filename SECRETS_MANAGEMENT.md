@@ -100,18 +100,18 @@ gh secret list | grep PROD
   ```bash
   # 1. Generate new secret
   new_pass=$(openssl rand -base64 32)
-  
+
   # 2. Update database
   docker-compose -f docker-compose.staging.yml exec postgres \
     psql -U airman_staging -d airman_staging \
     -c "ALTER ROLE airman_staging WITH PASSWORD '$new_pass';"
-  
+
   # 3. Update GitHub Secret
   gh secret set STAGING_DB_PASSWORD --body "$new_pass"
-  
+
   # 4. Update `.env.staging` locally
   sed -i "s/POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$new_pass/" .env.staging
-  
+
   # 5. Redeploy to staging
   git push origin staging
   ```
@@ -123,15 +123,15 @@ gh secret list | grep PROD
   # 1. Generate new secrets
   new_pass=$(openssl rand -base64 48)
   new_jwt=$(openssl rand -base64 96)
-  
+
   # 2. Store old secrets in archive (encrypted)
   echo "Date: $(date), Old Password: $old_pass" | gpg --symmetric > secrets-backup-$(date +%Y%m%d).gpg
-  
+
   # 3. Update in vault/secrets manager
   aws secretsmanager update-secret \
     --secret-id prod/airman/db_password \
     --secret-string "$new_pass"
-  
+
   # 4. Rotate in database (zero-downtime)
   # Create new user first, then switch
   docker-compose -f docker-compose.prod.yml exec postgres psql \
@@ -141,11 +141,11 @@ gh secret list | grep PROD
     -U postgres -d airman_prod \
     -c "GRANT ALL PRIVILEGES ON DATABASE airman_prod TO airman_prod_new;" && \
   # ... wait for connections to drain, then drop old role
-  
+
   # 5. Update GitHub Secret
   gh secret set PROD_DB_PASSWORD --body "$new_pass"
   gh secret set PROD_JWT_KEY --body "$new_jwt"
-  
+
   # 6. Trigger redeployment
   git push origin main
   ```
