@@ -24,7 +24,7 @@ async function main() {
     update: { name: 'Flight School B' },
   });
 
-  const [adminRoleA, instructorRoleA, studentRoleA] = await Promise.all([
+  const [adminRoleA, instructorRoleA, studentRoleA, adminRoleB, instructorRoleB, studentRoleB] = await Promise.all([
     prisma.role.upsert({
       where: { tenant_id_name: { tenant_id: tenantA.id, name: 'admin' } },
       create: { tenant_id: tenantA.id, name: 'admin' },
@@ -40,12 +40,27 @@ async function main() {
       create: { tenant_id: tenantA.id, name: 'student' },
       update: {},
     }),
+    prisma.role.upsert({
+      where: { tenant_id_name: { tenant_id: tenantB.id, name: 'admin' } },
+      create: { tenant_id: tenantB.id, name: 'admin' },
+      update: {},
+    }),
+    prisma.role.upsert({
+      where: { tenant_id_name: { tenant_id: tenantB.id, name: 'instructor' } },
+      create: { tenant_id: tenantB.id, name: 'instructor' },
+      update: {},
+    }),
+    prisma.role.upsert({
+      where: { tenant_id_name: { tenant_id: tenantB.id, name: 'student' } },
+      create: { tenant_id: tenantB.id, name: 'student' },
+      update: {},
+    }),
   ]);
 
   const hashedBasePassword = crypto.createHash('sha256').update('password').digest('hex');
   const demoPasswordHash = await argon2.hash(hashedBasePassword);
 
-  const [studentA, instructorA, adminA, studentB] = await Promise.all([
+  const [studentA, instructorA, adminA, studentB, instructorB, adminB] = await Promise.all([
     prisma.user.upsert({
       where: { tenant_id_email: { tenant_id: tenantA.id, email: 'studenta@test.com' } },
       create: {
@@ -95,18 +110,45 @@ async function main() {
       where: { tenant_id_email: { tenant_id: tenantB.id, email: 'studentb@test.com' } },
       create: {
         tenant_id: tenantB.id,
-        roleId: (await prisma.role.upsert({
-          where: { tenant_id_name: { tenant_id: tenantB.id, name: 'student' } },
-          create: { tenant_id: tenantB.id, name: 'student' },
-          update: {},
-        })).id,
+        roleId: studentRoleB.id,
         email: 'studentb@test.com',
         passwordHash: demoPasswordHash,
         name: 'Student B',
       },
       update: {
         passwordHash: demoPasswordHash,
+        roleId: studentRoleB.id,
         name: 'Student B',
+      },
+    }),
+    prisma.user.upsert({
+      where: { tenant_id_email: { tenant_id: tenantB.id, email: 'instructorb@test.com' } },
+      create: {
+        tenant_id: tenantB.id,
+        roleId: instructorRoleB.id,
+        email: 'instructorb@test.com',
+        passwordHash: demoPasswordHash,
+        name: 'Instructor B',
+      },
+      update: {
+        passwordHash: demoPasswordHash,
+        roleId: instructorRoleB.id,
+        name: 'Instructor B',
+      },
+    }),
+    prisma.user.upsert({
+      where: { tenant_id_email: { tenant_id: tenantB.id, email: 'adminb@test.com' } },
+      create: {
+        tenant_id: tenantB.id,
+        roleId: adminRoleB.id,
+        email: 'adminb@test.com',
+        passwordHash: demoPasswordHash,
+        name: 'Admin B',
+      },
+      update: {
+        passwordHash: demoPasswordHash,
+        roleId: adminRoleB.id,
+        name: 'Admin B',
       },
     }),
   ]);
@@ -354,10 +396,14 @@ VOR (VHF Omnidirectional Range) stations provide compass-like navigation referen
   console.log('📝 Lessons seeded: 6 (3 TEXT + 3 MCQ)');
   console.log('❓ Quiz questions: 15 total (5 per quiz)');
   console.log('\n👤 Demo credentials:');
-  console.log('   studenta@test.com / password    (Student)');
-  console.log('   instructora@test.com / password (Instructor)');
-  console.log('   admina@test.com / password      (Admin)');
-  console.log('   studentb@test.com / password    (Student, School B)');
+  console.log('   School A');
+  console.log('   - studenta@test.com / password    (Student)');
+  console.log('   - instructora@test.com / password (Instructor)');
+  console.log('   - admina@test.com / password      (Admin)');
+  console.log('   School B');
+  console.log('   - studentb@test.com / password    (Student)');
+  console.log('   - instructorb@test.com / password (Instructor)');
+  console.log('   - adminb@test.com / password      (Admin)');
 }
 
 main()

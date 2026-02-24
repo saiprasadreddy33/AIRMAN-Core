@@ -8,6 +8,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from './../../prisma/prisma.service';
 import { CacheService } from './../../common/cache/cache.service';
+import { NotificationsService } from '../../notifications/notifications.service';
 import {
   BookingStatus,
   isAllowedTransition,
@@ -21,18 +22,21 @@ import {
 
 const CONFLICTING_STATUSES = ['approved', 'assigned'] as const;
 
+const USER_SELECT = { id: true, name: true, email: true };
+const BOOKING_INCLUDE = {
+  instructor: { select: USER_SELECT },
+  student: { select: USER_SELECT },
+};
+
 @Injectable()
 export class BookingsService {
   constructor(
     private prisma: PrismaService,
     private cache: CacheService,
+    private notifications: NotificationsService,
     @InjectQueue(BOOKING_ESCALATION_QUEUE) private escalationQueue: Queue,
   ) {}
 
-  /**
-   * Check for time overlap with existing bookings for the same instructor
-   * where status is 'approved' or 'assigned'.
-   */
   private async hasInstructorOverlap(
     tenantId: string,
     instructorId: string,
@@ -53,27 +57,37 @@ export class BookingsService {
     return existing != null;
   }
 
-  /**
-   * Validate that startTime is before endTime
-   */
   private validateTimeSlot(startTime: Date, endTime: Date) {
     if (startTime >= endTime) {
       throw new BadRequestException('Start time must be before end time');
     }
   }
 
-  /** Load booking by tenant and id; throw NotFoundException if not found. */
   private async getBookingForUpdate(tenantId: string, id: string) {
     const booking = await this.prisma.booking.findFirst({
       where: { id, tenant_id: tenantId },
     });
-    if (!booking) {
-      throw new NotFoundException('Booking not found');
-    }
+    if (!booking) throw new NotFoundException('Booking not found');
     return booking;
   }
 
-  /** Validate status transition and update booking with new status and timestamp. */
+  private buildNotifyPayload(booking: {
+    id: string; tenant_id: string; start_time: Date; end_time: Date;
+    student?: { email: string; name?: string | null } | null;
+    instructor?: { email: string; name?: string | null } | null;
+  }) {
+    return {
+      bookingId: booking.id,
+      tenantId: booking.tenant_id,
+      studentEmail: booking.student?.email,
+      studentName: booking.student?.name ?? undefined,
+      instructorEmail: booking.instructor?.email,
+      instructorName: booking.instructor?.name ?? undefined,
+      startTime: booking.start_time.toISOString(),
+      endTime: booking.end_time.toISOString(),
+    };
+  }
+
   private async transition(
     tenantId: string,
     id: string,
@@ -86,15 +100,11 @@ export class BookingsService {
         `Invalid transition from status "${booking.status}" to "${toStatus}"`,
       );
     }
-    const now = new Date();
     const updated = await this.prisma.booking.update({
       where: { id },
-      data: {
-        status: toStatus,
-        [timestampField]: now,
-      },
+      data: { status: toStatus, [timestampField]: new Date() },
+      include: BOOKING_INCLUDE,
     });
-    // Invalidate bookings cache for this tenant after any state change
     await this.cache.invalidateBookings(tenantId);
     return updated;
   }
@@ -110,13 +120,7 @@ export class BookingsService {
   ) {
     this.validateTimeSlot(data.start_time, data.end_time);
 
-    const overlap = await this.hasInstructorOverlap(
-      tenantId,
-      data.instructor_id,
-      data.start_time,
-      data.end_time,
-    );
-    if (overlap) {
+    if (await this.hasInstructorOverlap(tenantId, data.instructor_id, data.start_time, data.end_time)) {
       throw new ConflictException('INSTRUCTOR_ALREADY_BOOKED');
     }
 
@@ -130,20 +134,18 @@ export class BookingsService {
         status: BookingStatus.requested,
         requested_at: new Date(),
       },
+      include: BOOKING_INCLUDE,
     });
 
-    // Invalidate bookings cache on create
     await this.cache.invalidateBookings(tenantId);
+    this.notifications.notifyBookingRequested(this.buildNotifyPayload(booking));
     return booking;
   }
 
   async approveBooking(tenantId: string, id: string) {
-    const booking = await this.transition(
-      tenantId,
-      id,
-      BookingStatus.approved,
-      'approved_at',
-    );
+    const booking = await this.transition(tenantId, id, BookingStatus.approved, 'approved_at');
+
+    this.notifications.notifyBookingApproved(this.buildNotifyPayload(booking));
 
     await this.escalationQueue.add(
       ESCALATION_JOB_NAME,
@@ -155,10 +157,9 @@ export class BookingsService {
       {
         delay: ESCALATION_DELAY_MS,
         attempts: ESCALATION_MAX_ATTEMPTS,
-        backoff: {
-          type: 'exponential',
-          delay: 5000,
-        },
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: true,
+        removeOnFail: false, // keep failed jobs for inspection
       },
     );
 
@@ -166,42 +167,60 @@ export class BookingsService {
   }
 
   async assignInstructor(tenantId: string, id: string) {
-    return this.transition(tenantId, id, BookingStatus.assigned, 'assigned_at');
+    const booking = await this.transition(tenantId, id, BookingStatus.assigned, 'assigned_at');
+    this.notifications.notifyBookingAssigned(this.buildNotifyPayload(booking));
+    return booking;
   }
 
   async completeBooking(tenantId: string, id: string) {
-    return this.transition(tenantId, id, BookingStatus.completed, 'completed_at');
+    const booking = await this.transition(tenantId, id, BookingStatus.completed, 'completed_at');
+    this.notifications.notifyBookingCompleted(this.buildNotifyPayload(booking));
+    return booking;
   }
 
   async cancelBooking(tenantId: string, id: string) {
-    return this.transition(tenantId, id, BookingStatus.cancelled, 'cancelled_at');
+    const booking = await this.transition(tenantId, id, BookingStatus.cancelled, 'cancelled_at');
+    this.notifications.notifyBookingCancelled(this.buildNotifyPayload(booking));
+    return booking;
   }
 
-  async findByTenant(tenantId: string, page = 1, limit = 10) {
-    const key = this.cache.bookingsKey(tenantId, page, limit);
-    const cached = await this.cache.get(key);
-    if (cached) return cached;
+  async findByTenant(
+    tenantId: string,
+    page = 1,
+    limit = 50,
+    userId?: string,
+    role?: string,
+  ) {
+    const roleFilter =
+      role === 'student'
+        ? { student_id: userId }
+        : role === 'instructor'
+          ? { instructor_id: userId }
+          : {};
 
+    const where = { tenant_id: tenantId, ...roleFilter };
     const skip = (page - 1) * limit;
 
     const [data, total] = await Promise.all([
       this.prisma.booking.findMany({
-        where: { tenant_id: tenantId },
+        where,
         orderBy: { start_time: 'desc' },
         skip,
         take: limit,
+        include: BOOKING_INCLUDE,
       }),
-      this.prisma.booking.count({
-        where: { tenant_id: tenantId },
-      }),
+      this.prisma.booking.count({ where }),
     ]);
 
-    const result = { data, total, page, limit };
-    await this.cache.set(key, result);
-    return result;
+    return { data, total, page, limit };
   }
 
   async findOne(tenantId: string, id: string) {
-    return this.getBookingForUpdate(tenantId, id);
+    const booking = await this.prisma.booking.findFirst({
+      where: { id, tenant_id: tenantId },
+      include: BOOKING_INCLUDE,
+    });
+    if (!booking) throw new NotFoundException('Booking not found');
+    return booking;
   }
 }

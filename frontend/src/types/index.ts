@@ -79,7 +79,7 @@ export interface Enrollment {
   completedLessons: string[];
 }
 
-export type BookingStatus = 'pending' | 'approved' | 'assigned' | 'completed' | 'cancelled';
+export type BookingStatus = 'requested' | 'pending' | 'approved' | 'assigned' | 'completed' | 'cancelled';
 
 export interface Availability {
   id: string;
@@ -105,6 +105,9 @@ export interface Booking {
   status: BookingStatus;
   notes?: string;
   createdAt: string;
+  requestedAt?: string;
+  approvedAt?: string;
+  assignedAt?: string;
 }
 
 export interface AuditLog {

@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getQueueToken } from '@nestjs/bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CacheService } from '../../common/cache/cache.service';
+import { NotificationsService } from '../../notifications/notifications.service';
 import { BookingsService } from './bookings.service';
 import { BOOKING_ESCALATION_QUEUE } from './constants/escalation.constants';
 
@@ -31,6 +32,8 @@ describe('BookingsService', () => {
     assigned_at: null,
     completed_at: null,
     cancelled_at: null,
+    instructor: { id: instructorId, name: 'Instructor', email: 'instructor@test.com' },
+    student: { id: studentId, name: 'Student', email: 'student@test.com' },
   };
 
   beforeEach(async () => {
@@ -43,10 +46,7 @@ describe('BookingsService', () => {
         {
           provide: PrismaService,
           useValue: {
-            booking: {
-              findFirst,
-              create,
-            },
+            booking: { findFirst, create },
           },
         },
         {
@@ -56,6 +56,17 @@ describe('BookingsService', () => {
             set: jest.fn().mockResolvedValue(undefined),
             bookingsKey: jest.fn().mockReturnValue('key'),
             invalidateBookings: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: NotificationsService,
+          useValue: {
+            notifyBookingRequested: jest.fn(),
+            notifyBookingApproved: jest.fn(),
+            notifyBookingAssigned: jest.fn(),
+            notifyBookingCompleted: jest.fn(),
+            notifyBookingCancelled: jest.fn(),
+            notifyEscalation: jest.fn(),
           },
         },
         {

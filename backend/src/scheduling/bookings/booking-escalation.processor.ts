@@ -1,7 +1,8 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../../notifications/notifications.service';
 import {
   BOOKING_ESCALATION_QUEUE,
   ESCALATION_JOB_NAME,
@@ -21,7 +22,10 @@ const TERMINAL_STATUSES = ['assigned', 'completed', 'cancelled'] as const;
 export class BookingEscalationProcessor extends WorkerHost {
   private readonly logger = new Logger(BookingEscalationProcessor.name);
 
-  constructor(private prisma: PrismaService) {
+  constructor(
+    private prisma: PrismaService,
+    private notifications: NotificationsService,
+  ) {
     super();
   }
 
@@ -30,10 +34,14 @@ export class BookingEscalationProcessor extends WorkerHost {
       return;
     }
 
-    const { booking_id, tenant_id } = job.data;
+    const { booking_id, tenant_id, approved_at } = job.data;
 
     const booking = await this.prisma.booking.findFirst({
       where: { id: booking_id, tenant_id },
+      include: {
+        student: { select: { id: true, name: true, email: true } },
+        instructor: { select: { id: true, name: true, email: true } },
+      },
     });
 
     if (!booking) {
@@ -41,21 +49,59 @@ export class BookingEscalationProcessor extends WorkerHost {
       return;
     }
 
-    const isTerminal =
-      TERMINAL_STATUSES.includes(booking.status as (typeof TERMINAL_STATUSES)[number]);
-
+    // If already moved past approval → no escalation needed
+    const isTerminal = TERMINAL_STATUSES.includes(
+      booking.status as (typeof TERMINAL_STATUSES)[number],
+    );
     if (isTerminal) {
+      this.logger.log(`Booking ${booking_id} is already ${booking.status} — escalation skipped`);
       return;
     }
 
-    this.logger.warn(
-      'ESCALATION_REQUIRED: Instructor not assigned within SLA',
-      { bookingId: booking_id, tenantId: tenant_id, status: booking.status },
-    );
+    this.logger.warn(`ESCALATION triggered for booking ${booking_id} (approved_at: ${approved_at})`);
 
-    await this.prisma.booking.updateMany({
-      where: { id: booking_id, tenant_id },
+    // Mark escalation required
+    await this.prisma.booking.update({
+      where: { id: booking_id },
       data: { escalation_required: true },
     });
+
+    // Fetch admin users for this tenant to notify
+    const adminRole = await this.prisma.role.findFirst({
+      where: { tenant_id, name: 'admin' },
+    });
+    const admins = adminRole
+      ? await this.prisma.user.findMany({
+          where: { tenant_id, roleId: adminRole.id },
+          select: { email: true, name: true },
+        })
+      : [];
+
+    const adminEmails = admins.map(a => a.email);
+
+    // Send escalation notification stub
+    this.notifications.notifyEscalation({
+      bookingId: booking_id,
+      tenantId: tenant_id,
+      studentEmail: booking.student?.email,
+      studentName: booking.student?.name ?? undefined,
+      instructorEmail: booking.instructor?.email,
+      instructorName: booking.instructor?.name ?? undefined,
+      startTime: booking.start_time.toISOString(),
+      endTime: booking.end_time.toISOString(),
+      approvedAt: approved_at,
+      adminEmails,
+    });
+  }
+
+  /**
+   * Dead-letter handler: log if the job exhausts all retries.
+   */
+  @OnWorkerEvent('failed')
+  onFailed(job: Job<EscalateBookingAssignmentPayload>, error: Error) {
+    this.logger.error(
+      `[DEAD-LETTER] Escalation job ${job.id} for booking ${job.data?.booking_id} failed after ${job.attemptsMade} attempts: ${error.message}`,
+      error.stack,
+    );
   }
 }

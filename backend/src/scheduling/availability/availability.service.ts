@@ -51,6 +51,10 @@ export class AvailabilityService {
     // Note: instructor-specific caches would also need invalidation if needed
   }
 
+  private readonly INSTRUCTOR_INCLUDE = {
+    instructor: { select: { id: true, name: true, email: true } },
+  };
+
   async create(
     tenantId: string,
     instructorId: string,
@@ -79,6 +83,7 @@ export class AvailabilityService {
         start_time: data.start_time,
         end_time: data.end_time,
       },
+      include: this.INSTRUCTOR_INCLUDE,
     });
 
     await this.invalidateAvailabilityCaches(tenantId);
@@ -159,6 +164,7 @@ export class AvailabilityService {
         orderBy: [{ start_time: 'asc' }],
         skip,
         take: limit,
+        include: this.INSTRUCTOR_INCLUDE,
       }),
       this.prisma.instructorAvailability.count({
         where: { tenant_id: tenantId },
@@ -183,6 +189,7 @@ export class AvailabilityService {
         orderBy: [{ start_time: 'asc' }],
         skip,
         take: limit,
+        include: this.INSTRUCTOR_INCLUDE,
       }),
       this.prisma.instructorAvailability.count({
         where: { tenant_id: tenantId, instructor_id: instructorId },
