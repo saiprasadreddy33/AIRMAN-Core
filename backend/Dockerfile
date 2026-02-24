@@ -25,6 +25,10 @@ RUN npm run build
 # ──────────────────────────────────────────────
 FROM node:20-alpine AS runner
 
+# Install openssl which is required for Prisma engines on Alpine,
+# otherwise npx prisma generate/migrate deploy will fail with status 134
+RUN apk add --no-cache openssl
+
 WORKDIR /app
 
 # Copy compiled output

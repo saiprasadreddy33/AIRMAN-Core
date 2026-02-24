@@ -2,6 +2,8 @@
 import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
 
+import * as crypto from 'crypto';
+
 const prisma = new PrismaClient();
 
 async function main() {
@@ -40,7 +42,8 @@ async function main() {
     }),
   ]);
 
-  const demoPasswordHash = await argon2.hash('password');
+  const hashedBasePassword = crypto.createHash('sha256').update('password').digest('hex');
+  const demoPasswordHash = await argon2.hash(hashedBasePassword);
 
   const [studentA, instructorA, adminA, studentB] = await Promise.all([
     prisma.user.upsert({
