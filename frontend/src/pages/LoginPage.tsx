@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Eye, EyeOff, Plane } from 'lucide-react';
+import { Eye, EyeOff, Plane, ChevronDown, ChevronUp } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getDemoCredentials } from '@/lib/auth';
 import { UserRole } from '@/types';
@@ -21,6 +21,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showDemos, setShowDemos] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated) router.replace('/dashboard');
@@ -135,24 +136,37 @@ export default function LoginPage() {
           </form>
 
           <div className="mt-6">
-            <p className="text-xs text-muted-foreground mb-3 font-medium uppercase tracking-wider">Demo Credentials</p>
-            <div className="space-y-2">
-              {demos.map(d => (
-                <button
-                  key={d.email}
-                  onClick={() => fillCredentials(d.email, d.password)}
-                  className="w-full flex items-center justify-between px-3 py-2.5 bg-muted hover:bg-secondary border border-border hover:border-primary/30 rounded-lg transition-all group"
-                >
-                  <div className="text-left">
-                    <div className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">{d.name}</div>
-                    <div className="text-xs text-muted-foreground">{d.email}</div>
-                  </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${ROLE_COLORS[d.role]} capitalize font-medium`}>
-                    {d.role}
-                  </span>
-                </button>
-              ))}
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowDemos(!showDemos)}
+              className="w-full flex items-center justify-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors mb-3 font-medium uppercase tracking-wider"
+            >
+              Want some creds? {showDemos ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+
+            {showDemos && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                className="space-y-2 overflow-hidden"
+              >
+                {demos.map(d => (
+                  <button
+                    key={d.email}
+                    onClick={() => fillCredentials(d.email, d.password)}
+                    className="w-full flex items-center justify-between px-3 py-2.5 bg-muted hover:bg-secondary border border-border hover:border-primary/30 rounded-lg transition-all group"
+                  >
+                    <div className="text-left">
+                      <div className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">{d.name}</div>
+                      <div className="text-xs text-muted-foreground">{d.email}</div>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${ROLE_COLORS[d.role]} capitalize font-medium`}>
+                      {d.role}
+                    </span>
+                  </button>
+                ))}
+              </motion.div>
+            )}
           </div>
         </div>
       </motion.div>
