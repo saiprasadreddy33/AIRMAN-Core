@@ -9,7 +9,10 @@ npx prisma migrate deploy
 
 if [ "$RUN_DB_SEED" = "true" ]; then
 	echo "==> Seeding initial data..."
-	npm run prisma:seed
+	if ! node -r ts-node/register prisma/seed.ts; then
+		echo "==> TS seed failed, falling back to prisma/seed.js"
+		node prisma/seed.js
+	fi
 fi
 
 echo "==> Starting API server..."
