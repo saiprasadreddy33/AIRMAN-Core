@@ -1,66 +1,91 @@
 services:
-  # -------------------------------
-  # API Service
-  # -------------------------------
+  # ──────────────────────────────────────────
+  # API — Docker deploy
+  # ──────────────────────────────────────────
   - type: web
     name: airman-api
     env: docker
     plan: free
     dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
     envVars:
       - key: DATABASE_URL
         fromDatabase:
           name: airman-db
           property: connectionString
 
-      - key: REDIS_HOST
+      - key: REDIS_URL
         fromService:
           type: redis
           name: airman-redis
           property: connectionString
-      - key: REDIS_PORT
-        value: 6379
+
       - key: JWT_PUBLIC_KEY
-        value: super-secret-key
+        value: super-secret-key  # CHANGE before going live
+
+      - key: JWT_SECRET
+        value: super-secret-key  # CHANGE before going live
+
       - key: PORT
         value: 3001
 
-# -------------------------------
-# PostgreSQL Database (Valid for 90 days on Free Tier)
-# -------------------------------
-databases:
-  - name: airman-db
-    plan: free
+      # Set to "true" on FIRST deploy only, then clear it
+      - key: RUN_DB_SEED
+        value: true
 
-  # -------------------------------
-  # Redis Instance
-  # -------------------------------
-  - type: redis
-    name: airman-redis
-    plan: free
-  # -------------------------------
-  # Worker Service
-  # -------------------------------
+      - key: FRONTEND_ORIGIN
+        value: https://airman-frontend.vercel.app,https://airman-core.vercel.app
+
+      - key: NODE_ENV
+        value: production
+
+      - key: ESCALATION_HOURS
+        value: 2
+
+  # ──────────────────────────────────────────
+  # BullMQ Worker — reuses same image
+  # ──────────────────────────────────────────
   - type: worker
     name: airman-worker
     env: docker
     plan: free
     dockerfilePath: ./backend/Dockerfile
-    startCommand: sh backend/entrypoint.sh
+    dockerContext: ./backend
     envVars:
       - key: DATABASE_URL
         fromDatabase:
           name: airman-db
           property: connectionString
 
-      - key: REDIS_HOST
+      - key: REDIS_URL
         fromService:
           type: redis
           name: airman-redis
-          property: host
-
-      - key: REDIS_PORT
-        value: 6379
+          property: connectionString
 
       - key: JWT_PUBLIC_KEY
         value: super-secret-key
+
+      - key: JWT_SECRET
+        value: super-secret-key
+
+      - key: NODE_ENV
+        value: production
+
+      - key: ESCALATION_HOURS
+        value: 2
+
+  # ──────────────────────────────────────────
+  # Redis
+  # ──────────────────────────────────────────
+  - type: redis
+    name: airman-redis
+    plan: free
+    ipAllowList: []
+
+# ──────────────────────────────────────────
+# PostgreSQL Database (free tier, 90 days)
+# ──────────────────────────────────────────
+databases:
+  - name: airman-db
+    plan: free

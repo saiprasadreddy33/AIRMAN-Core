@@ -103,7 +103,9 @@ redis_data_prod/
 # 📊 DATABASE & BACKUP FILES
 # ═══════════════════════════════════════════════════════════════════════════════
 
-*.sql
+# *.sql intentionally NOT ignored here — Prisma migration files (prisma/migrations/**/*.sql)
+# must be committed to git so that 'prisma migrate deploy' works on Render and other environments.
+# Only ignore backup/dump files.
 *.sql.gz
 *.backup
 *.dump
