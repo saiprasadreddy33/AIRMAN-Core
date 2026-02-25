@@ -29,6 +29,18 @@ export class CoursesController {
     return this.coursesService.findAll(req.user.tenant_id, page, limit, search);
   }
 
+  /**
+   * Dashboard endpoint: returns all courses the student has started/completed
+   * with progress percentages. Single round-trip, no N+1.
+   */
+  @Get('my-progress')
+  @Roles('student')
+  async getMyProgress(
+    @Req() req: { user: { tenant_id: string; user_id: string } },
+  ) {
+    return this.coursesService.findMyProgressSummary(req.user.tenant_id, req.user.user_id);
+  }
+
   @Get(':id/modules')
   @Roles('admin', 'instructor', 'student')
   async findModules(
@@ -39,5 +51,18 @@ export class CoursesController {
     @Query('search') search?: string,
   ) {
     return this.coursesService.findModulesByCourse(req.user.tenant_id, id, page, limit, search);
+  }
+
+  /**
+   * Returns per-lesson and per-module completion progress for the calling student.
+   * Tenant-scoped — cross-tenant reads are rejected at the service layer.
+   */
+  @Get(':id/progress')
+  @Roles('student', 'admin', 'instructor')
+  async getCourseProgress(
+    @Param('id') id: string,
+    @Req() req: { user: { tenant_id: string; user_id: string } },
+  ) {
+    return this.coursesService.findCourseProgress(req.user.tenant_id, id, req.user.user_id);
   }
 }

@@ -39,6 +39,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Override: run migrations then start NestJS in watch mode (hot-reload)
+    command: >
+      sh -c "npx prisma generate &&
+             npx prisma migrate deploy &&
+             ([ \"$$RUN_DB_SEED\" = 'true' ] && node prisma/seed.js || true) &&
+             npm run start:dev"
     env_file:
       - .env.dev
     environment:
@@ -47,6 +53,9 @@ services:
       REDIS_PORT: "${REDIS_PORT}"
       RUN_DB_SEED: "true"
       LOG_LEVEL: debug
+      # Required for file-watching inside Docker on Windows/WSL
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "1000"
     ports:
       - "3001:3001"
     depends_on:
@@ -56,6 +65,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/src:/app/src
+      - ./backend/prisma:/app/prisma
       - /app/node_modules
 
   # ── Frontend (Next.js) - Dev ────────────────────────────────────────────────
@@ -64,15 +74,23 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Override: run Next.js dev server (hot-reload) instead of production build
+    command: sh -c "npm run dev -- -H 0.0.0.0 -p 3000"
     env_file:
       - .env.dev
+    environment:
+      # Required for file-watching inside Docker on Windows/WSL
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
     ports:
       - "3000:3000"
     depends_on:
       - api
     volumes:
       - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
       - /app/node_modules
+      - /app/.next
 
   # ── Worker (BullMQ) - Dev ───────────────────────────────────────────────────
   worker:

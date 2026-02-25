@@ -13,11 +13,27 @@ import {
   updateOfflineAttempt,
   getPendingAttempts,
   getAttemptsByLesson,
+  getAttemptById,
   clearOldOfflineData,
   OfflineAttempt,
   StoredQuiz,
 } from '@/lib/offline-quiz';
 import { api } from '@/lib/api';
+
+export interface AttemptSyncResult {
+  clientId: string;
+  serverResult?: {
+    attemptId: string;
+    score: number;
+    total: number;
+    incorrectQuestions: Array<{ questionId: string; correctAnswer: number }>;
+    lessonCompleted: boolean;
+    moduleCompleted: boolean;
+    courseCompleted: boolean;
+    duplicateSync?: boolean;
+  };
+  error?: string;
+}
 
 export interface OfflineQuizState {
   isOnline: boolean;
@@ -25,6 +41,7 @@ export interface OfflineQuizState {
   pendingAttempts: number;
   syncInProgress: boolean;
   lastSyncTime: number | null;
+  syncResults: AttemptSyncResult[];
 }
 
 export interface UseOfflineQuizReturn {
@@ -32,7 +49,7 @@ export interface UseOfflineQuizReturn {
   cacheQuiz: (lesson: any) => Promise<void>;
   createLocalAttempt: (lessonId: string) => Promise<string>;
   updateLocalAttempt: (attemptId: string, answers: any, completed: boolean) => Promise<void>;
-  syncAttempts: () => Promise<void>;
+  syncAttempts: () => Promise<AttemptSyncResult[]>;
   getLocalAttempt: (attemptId: string) => Promise<OfflineAttempt | null>;
 }
 
@@ -45,6 +62,7 @@ export function useOfflineQuiz(): UseOfflineQuizReturn {
   const [pendingAttempts, setPendingAttempts] = useState(0);
   const [syncInProgress, setSyncInProgress] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
+  const [syncResults, setSyncResults] = useState<AttemptSyncResult[]>([]);
   const syncTimeoutRef = useRef<NodeJS.Timeout>();
 
   // Detect online/offline status
@@ -138,8 +156,7 @@ export function useOfflineQuiz(): UseOfflineQuizReturn {
    */
   const updateLocalAttempt = useCallback(
     async (attemptId: string, answers: any, completed: boolean): Promise<void> => {
-      const attempts = await getAttemptsByLesson(attemptId); // This is not ideal, but for now
-      const attempt = attempts.find((a) => a.id === attemptId);
+      const attempt = await getAttemptById(attemptId);
 
       if (!attempt) {
         console.warn(`Attempt not found: ${attemptId}`);
@@ -161,25 +178,25 @@ export function useOfflineQuiz(): UseOfflineQuizReturn {
   /**
    * Sync all pending attempts to backend
    */
-  const syncAttemptsInternal = async (): Promise<void> => {
-    if (!isOnline || syncInProgress) return;
+  const syncAttemptsInternal = async (): Promise<AttemptSyncResult[]> => {
+    if (!isOnline || syncInProgress) return [];
 
     setSyncInProgress(true);
+    const results: AttemptSyncResult[] = [];
     try {
       const pending = await getPendingAttempts();
 
       if (pending.length === 0) {
         console.log('✅ No pending attempts to sync');
         setSyncInProgress(false);
-        return;
+        return [];
       }
 
       console.log(`🔄 Syncing ${pending.length} attempt(s)...`);
 
       for (const attempt of pending) {
         try {
-          const response = await api.post('/lessons/sync-attempt', {
-            lessonId: attempt.lessonId,
+          const response = await api.post(`/lessons/${attempt.lessonId}/sync-attempt`, {
             answers: attempt.answers,
             clientId: attempt.id,
           });
@@ -189,15 +206,18 @@ export function useOfflineQuiz(): UseOfflineQuizReturn {
           await updateOfflineAttempt(attempt);
 
           console.log(`✅ Attempt synced: ${attempt.id}`);
+          results.push({ clientId: attempt.id, serverResult: response });
         } catch (err: any) {
           attempt.syncStatus = 'error';
           attempt.syncError = err.message || 'Sync failed';
           await updateOfflineAttempt(attempt);
           console.error(`❌ Failed to sync attempt ${attempt.id}:`, err);
+          results.push({ clientId: attempt.id, error: err.message || 'Sync failed' });
         }
       }
 
       setLastSyncTime(Date.now());
+      setSyncResults(results);
       const updated = await getPendingAttempts();
       setPendingAttempts(updated.length);
     } catch (err) {
@@ -205,9 +225,10 @@ export function useOfflineQuiz(): UseOfflineQuizReturn {
     } finally {
       setSyncInProgress(false);
     }
+    return results;
   };
 
-  const syncAttempts = useCallback(async (): Promise<void> => {
+  const syncAttempts = useCallback(async (): Promise<AttemptSyncResult[]> => {
     return syncAttemptsInternal();
   }, [isOnline, syncInProgress]);
 
@@ -235,6 +256,7 @@ export function useOfflineQuiz(): UseOfflineQuizReturn {
       pendingAttempts,
       syncInProgress,
       lastSyncTime,
+      syncResults,
     },
     cacheQuiz,
     createLocalAttempt,

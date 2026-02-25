@@ -179,6 +179,25 @@ export async function getAttemptsByLesson(lessonId: string): Promise<OfflineAtte
 }
 
 /**
+ * Get a single offline attempt by its local ID
+ */
+export async function getAttemptById(id: string): Promise<OfflineAttempt | null> {
+  try {
+    const db = await getDB();
+    const tx = db.transaction([ATTEMPT_STORE], 'readonly');
+    const store = tx.objectStore(ATTEMPT_STORE);
+    return new Promise((resolve, reject) => {
+      const req = store.get(id);
+      req.onsuccess = () => resolve((req.result as OfflineAttempt) || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (err) {
+    console.warn('Failed to get attempt by id:', err);
+    return null;
+  }
+}
+
+/**
  * Clear old offline data (older than 30 days)
  */
 export async function clearOldOfflineData(): Promise<void> {

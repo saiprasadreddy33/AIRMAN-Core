@@ -34,6 +34,22 @@ export class LessonsController {
   }
 
   /**
+   * Mark a TEXT lesson as complete (no quiz — just reading confirmation)
+   */
+  @Post(':id/complete')
+  @Roles('student')
+  async markTextComplete(
+    @Param('id') id: string,
+    @Req() req: { user: { tenant_id: string; user_id: string } },
+  ) {
+    return this.lessonsService.markTextLessonComplete(
+      req.user.tenant_id,
+      id,
+      req.user.user_id,
+    );
+  }
+
+  /**
    * Endpoint to sync offline quiz attempts
    * Handles duplicate detection and validation
    */

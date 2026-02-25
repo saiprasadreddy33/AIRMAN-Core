@@ -295,6 +295,43 @@ export class LessonsService {
   }
 
   /**
+   * Mark a TEXT lesson as complete for a student.
+   * Triggers module/course completion propagation atomically.
+   */
+  async markTextLessonComplete(tenantId: string, lessonId: string, studentId: string) {
+    const lesson = await this.prisma.lesson.findFirst({
+      where: { id: lessonId, tenant_id: tenantId },
+      include: { module: { select: { course_id: true } } },
+    });
+
+    if (!lesson) {
+      throw new NotFoundException('Lesson not found');
+    }
+
+    if (lesson.type !== 'TEXT') {
+      throw new BadRequestException('Use POST /lessons/:id/attempt for MCQ lessons');
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      return this.propagateCompletion(
+        tx,
+        tenantId,
+        studentId,
+        lessonId,
+        lesson.module_id,
+        lesson.module.course_id,
+        true,
+      );
+    });
+
+    return {
+      lessonCompleted: result.lessonCompleted,
+      moduleCompleted: result.moduleCompleted,
+      courseCompleted: result.courseCompleted,
+    };
+  }
+
+  /**
    * Sync offline quiz attempt from client
    * Handles duplicate detection and validation
    */
