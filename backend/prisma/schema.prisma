@@ -25,6 +25,9 @@ model Tenant {
   lessons          Lesson[]
   quizQuestions    QuizQuestion[]
   quizAttempts     QuizAttempt[]
+  lessonProgresses LessonProgress[]
+  moduleProgresses ModuleProgress[]
+  courseProgresses CourseProgress[]
 
   @@index([tenant_id])
 }
@@ -63,6 +66,9 @@ model User {
   studentBookings        Booking[]              @relation("StudentBookings")
 
   quizAttempts           QuizAttempt[]
+  lessonProgresses       LessonProgress[]
+  moduleProgresses       ModuleProgress[]
+  courseProgresses       CourseProgress[]
 
   @@unique([tenant_id, email])
   @@index([tenant_id])
@@ -152,6 +158,7 @@ model Course {
 
   tenant      Tenant           @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   modules     LearningModule[]
+  progresses  CourseProgress[]
 
   @@index([tenant_id])
 }
@@ -166,6 +173,7 @@ model LearningModule {
   tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   course     Course   @relation(fields: [course_id], references: [id], onDelete: Cascade)
   lessons    Lesson[]
+  progresses ModuleProgress[]
 
   @@index([tenant_id])
   @@index([course_id])
@@ -184,6 +192,7 @@ model Lesson {
   module     LearningModule @relation(fields: [module_id], references: [id], onDelete: Cascade)
   questions  QuizQuestion[]
   attempts   QuizAttempt[]
+  progresses LessonProgress[]
 
   @@index([tenant_id])
   @@index([module_id])
@@ -227,3 +236,56 @@ model QuizAttempt {
   @@index([source])
 }
 
+model LessonProgress {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenant_id    String   @map("tenant_id") @db.Uuid
+  student_id   String   @map("student_id") @db.Uuid
+  lesson_id    String   @map("lesson_id") @db.Uuid
+  status       String
+  completed_at DateTime? @map("completed_at")
+
+  tenant  Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  student User   @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  lesson  Lesson @relation(fields: [lesson_id], references: [id], onDelete: Cascade)
+
+  @@unique([tenant_id, student_id, lesson_id])
+  @@index([tenant_id])
+  @@index([student_id])
+  @@index([lesson_id])
+}
+
+model ModuleProgress {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenant_id    String   @map("tenant_id") @db.Uuid
+  student_id   String   @map("student_id") @db.Uuid
+  module_id    String   @map("module_id") @db.Uuid
+  status       String
+  completed_at DateTime? @map("completed_at")
+
+  tenant  Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  student User           @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  module  LearningModule @relation(fields: [module_id], references: [id], onDelete: Cascade)
+
+  @@unique([tenant_id, student_id, module_id])
+  @@index([tenant_id])
+  @@index([student_id])
+  @@index([module_id])
+}
+
+model CourseProgress {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenant_id    String   @map("tenant_id") @db.Uuid
+  student_id   String   @map("student_id") @db.Uuid
+  course_id    String   @map("course_id") @db.Uuid
+  status       String
+  completed_at DateTime? @map("completed_at")
+
+  tenant  Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  student User   @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  course  Course @relation(fields: [course_id], references: [id], onDelete: Cascade)
+
+  @@unique([tenant_id, student_id, course_id])
+  @@index([tenant_id])
+  @@index([student_id])
+  @@index([course_id])
+}

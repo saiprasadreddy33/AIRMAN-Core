@@ -9,7 +9,10 @@ import { BOOKING_ESCALATION_QUEUE } from './constants/escalation.constants';
 
 describe('BookingsService', () => {
   let service: BookingsService;
-  let prisma: { booking: { findFirst: jest.Mock; create: jest.Mock } };
+  let prisma: {
+    booking: { findFirst: jest.Mock; create: jest.Mock };
+    instructorAvailability: { findFirst: jest.Mock };
+  };
 
   const tenantId = '11111111-1111-1111-1111-111111111111';
   const instructorId = '22222222-2222-2222-2222-222222222222';
@@ -39,6 +42,7 @@ describe('BookingsService', () => {
   beforeEach(async () => {
     const findFirst = jest.fn();
     const create = jest.fn();
+    const availabilityFindFirst = jest.fn();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -47,6 +51,7 @@ describe('BookingsService', () => {
           provide: PrismaService,
           useValue: {
             booking: { findFirst, create },
+            instructorAvailability: { findFirst: availabilityFindFirst },
           },
         },
         {
@@ -56,6 +61,7 @@ describe('BookingsService', () => {
             set: jest.fn().mockResolvedValue(undefined),
             bookingsKey: jest.fn().mockReturnValue('key'),
             invalidateBookings: jest.fn().mockResolvedValue(undefined),
+            invalidateAvailability: jest.fn().mockResolvedValue(undefined),
           },
         },
         {
@@ -81,6 +87,7 @@ describe('BookingsService', () => {
   });
 
   it('should create first booking when no overlap', async () => {
+    prisma.instructorAvailability.findFirst.mockResolvedValue({});
     prisma.booking.findFirst.mockResolvedValue(null);
     prisma.booking.create.mockResolvedValue({
       ...existingBooking,
@@ -110,6 +117,7 @@ describe('BookingsService', () => {
 
   it('should throw ConflictException (INSTRUCTOR_ALREADY_BOOKED) on instructor double-book attempt', async () => {
     // First call: no overlap → booking created
+    prisma.instructorAvailability.findFirst.mockResolvedValue({});
     prisma.booking.findFirst.mockResolvedValueOnce(null);
     prisma.booking.create.mockResolvedValue({
       ...existingBooking,
@@ -138,5 +146,17 @@ describe('BookingsService', () => {
 
     expect(prisma.booking.create).toHaveBeenCalledTimes(1);
   });
-});
 
+  it('should throw ConflictException when instructor has no availability for requested slot', async () => {
+    prisma.instructorAvailability.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.create(tenantId, {
+        instructor_id: instructorId,
+        student_id: studentId,
+        start_time: start1,
+        end_time: end1,
+      }),
+    ).rejects.toThrow('INSTRUCTOR_NOT_AVAILABLE');
+  });
+});

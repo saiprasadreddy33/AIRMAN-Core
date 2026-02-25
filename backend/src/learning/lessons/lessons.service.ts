@@ -7,9 +7,212 @@ export interface QuizAnswerInput {
   answer: number;
 }
 
+const PASS_THRESHOLD = 0.7;
+
 @Injectable()
 export class LessonsService {
   constructor(private prisma: PrismaService) {}
+
+  private gradeQuiz(
+    questions: { id: string; correct_option: number }[],
+    answers: QuizAnswerInput[],
+  ) {
+    let score = 0;
+    const incorrectQuestions: { questionId: string; correctAnswer: number }[] = [];
+    const questionMap = new Map(questions.map((q) => [q.id, q]));
+
+    for (const ans of answers) {
+      const dbQuestion = questionMap.get(ans.questionId);
+      if (dbQuestion) {
+        if (dbQuestion.correct_option === ans.answer) {
+          score++;
+        } else {
+          incorrectQuestions.push({
+            questionId: dbQuestion.id,
+            correctAnswer: dbQuestion.correct_option,
+          });
+        }
+      }
+    }
+
+    return { score, incorrectQuestions };
+  }
+
+  private async propagateCompletion(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    studentId: string,
+    lessonId: string,
+    moduleId: string,
+    courseId: string,
+    passed: boolean,
+  ) {
+    let lessonCompleted = false;
+    let moduleCompleted = false;
+    let courseCompleted = false;
+
+    const existingLessonProgress = await tx.lessonProgress.findUnique({
+      where: {
+        tenant_id_student_id_lesson_id: {
+          tenant_id: tenantId,
+          student_id: studentId,
+          lesson_id: lessonId,
+        },
+      },
+    });
+
+    if (passed) {
+      if (!existingLessonProgress || existingLessonProgress.status !== 'completed') {
+        await tx.lessonProgress.upsert({
+          where: {
+            tenant_id_student_id_lesson_id: {
+              tenant_id: tenantId,
+              student_id: studentId,
+              lesson_id: lessonId,
+            },
+          },
+          update: {
+            status: 'completed',
+            completed_at: new Date(),
+          },
+          create: {
+            tenant_id: tenantId,
+            student_id: studentId,
+            lesson_id: lessonId,
+            status: 'completed',
+            completed_at: new Date(),
+          },
+        });
+      }
+      lessonCompleted = true;
+    } else if (!existingLessonProgress) {
+      await tx.lessonProgress.create({
+        data: {
+          tenant_id: tenantId,
+          student_id: studentId,
+          lesson_id: lessonId,
+          status: 'in_progress',
+        },
+      });
+    }
+
+    if (!lessonCompleted) {
+      return { lessonCompleted, moduleCompleted, courseCompleted };
+    }
+
+    const [totalLessonsInModule, completedLessonsInModule] = await Promise.all([
+      tx.lesson.count({
+        where: { tenant_id: tenantId, module_id: moduleId },
+      }),
+      tx.lessonProgress.count({
+        where: {
+          tenant_id: tenantId,
+          student_id: studentId,
+          status: 'completed',
+          lesson: {
+            tenant_id: tenantId,
+            module_id: moduleId,
+          },
+        },
+      }),
+    ]);
+
+    if (totalLessonsInModule > 0 && completedLessonsInModule >= totalLessonsInModule) {
+      const existingModuleProgress = await tx.moduleProgress.findUnique({
+        where: {
+          tenant_id_student_id_module_id: {
+            tenant_id: tenantId,
+            student_id: studentId,
+            module_id: moduleId,
+          },
+        },
+      });
+
+      if (!existingModuleProgress || existingModuleProgress.status !== 'completed') {
+        await tx.moduleProgress.upsert({
+          where: {
+            tenant_id_student_id_module_id: {
+              tenant_id: tenantId,
+              student_id: studentId,
+              module_id: moduleId,
+            },
+          },
+          update: {
+            status: 'completed',
+            completed_at: new Date(),
+          },
+          create: {
+            tenant_id: tenantId,
+            student_id: studentId,
+            module_id: moduleId,
+            status: 'completed',
+            completed_at: new Date(),
+          },
+        });
+      }
+
+      moduleCompleted = true;
+    }
+
+    if (!moduleCompleted) {
+      return { lessonCompleted, moduleCompleted, courseCompleted };
+    }
+
+    const [totalModulesInCourse, completedModulesInCourse] = await Promise.all([
+      tx.learningModule.count({
+        where: { tenant_id: tenantId, course_id: courseId },
+      }),
+      tx.moduleProgress.count({
+        where: {
+          tenant_id: tenantId,
+          student_id: studentId,
+          status: 'completed',
+          module: {
+            tenant_id: tenantId,
+            course_id: courseId,
+          },
+        },
+      }),
+    ]);
+
+    if (totalModulesInCourse > 0 && completedModulesInCourse >= totalModulesInCourse) {
+      const existingCourseProgress = await tx.courseProgress.findUnique({
+        where: {
+          tenant_id_student_id_course_id: {
+            tenant_id: tenantId,
+            student_id: studentId,
+            course_id: courseId,
+          },
+        },
+      });
+
+      if (!existingCourseProgress || existingCourseProgress.status !== 'completed') {
+        await tx.courseProgress.upsert({
+          where: {
+            tenant_id_student_id_course_id: {
+              tenant_id: tenantId,
+              student_id: studentId,
+              course_id: courseId,
+            },
+          },
+          update: {
+            status: 'completed',
+            completed_at: new Date(),
+          },
+          create: {
+            tenant_id: tenantId,
+            student_id: studentId,
+            course_id: courseId,
+            status: 'completed',
+            completed_at: new Date(),
+          },
+        });
+      }
+      courseCompleted = true;
+    }
+
+    return { lessonCompleted, moduleCompleted, courseCompleted };
+  }
 
   async getLesson(tenantId: string, id: string) {
     const lesson = await this.prisma.lesson.findFirst({
@@ -36,7 +239,7 @@ export class LessonsService {
   async attemptQuiz(tenantId: string, lessonId: string, studentId: string, answers: QuizAnswerInput[]) {
     const lesson = await this.prisma.lesson.findFirst({
       where: { id: lessonId, tenant_id: tenantId },
-      include: { questions: true },
+      include: { questions: true, module: { select: { course_id: true } } },
     });
 
     if (!lesson) {
@@ -51,40 +254,43 @@ export class LessonsService {
       throw new BadRequestException('Quiz has no questions to attempt');
     }
 
-    let score = 0;
-    const incorrectQuestions: { questionId: string; correctAnswer: number }[] = [];
-    const questionMap = new Map(lesson.questions.map((q) => [q.id, q]));
+    const { score, incorrectQuestions } = this.gradeQuiz(lesson.questions, answers);
+    const total = lesson.questions.length;
+    const passed = total > 0 && score / total >= PASS_THRESHOLD;
 
-    for (const ans of answers) {
-      const dbQuestion = questionMap.get(ans.questionId);
-      if (dbQuestion) {
-        if (dbQuestion.correct_option === ans.answer) {
-          score++;
-        } else {
-          incorrectQuestions.push({
-            questionId: dbQuestion.id,
-            correctAnswer: dbQuestion.correct_option,
-          });
-        }
-      }
-    }
+    const result = await this.prisma.$transaction(async (tx) => {
+      const attempt = await tx.quizAttempt.create({
+        data: {
+          tenant_id: tenantId,
+          student_id: studentId,
+          lesson_id: lessonId,
+          score,
+          total,
+          answers: answers as unknown as Prisma.InputJsonValue,
+        },
+      });
 
-    // Persist attempt
-    const attempt = await this.prisma.quizAttempt.create({
-      data: {
-        tenant_id: tenantId,
-        student_id: studentId,
-        lesson_id: lessonId,
-        score,
-        answers: answers as unknown as Prisma.InputJsonValue,
-      },
+      const completion = await this.propagateCompletion(
+        tx,
+        tenantId,
+        studentId,
+        lessonId,
+        lesson.module_id,
+        lesson.module.course_id,
+        passed,
+      );
+
+      return { attempt, completion };
     });
 
     return {
-      attemptId: attempt.id,
+      attemptId: result.attempt.id,
       score,
-      total: lesson.questions.length,
+      total,
       incorrectQuestions,
+      lessonCompleted: result.completion.lessonCompleted,
+      moduleCompleted: result.completion.moduleCompleted,
+      courseCompleted: result.completion.courseCompleted,
     };
   }
 
@@ -120,10 +326,9 @@ export class LessonsService {
       };
     }
 
-    // Grade and store attempt (same logic as online)
     const lesson = await this.prisma.lesson.findFirst({
       where: { id: lessonId, tenant_id: tenantId },
-      include: { questions: true },
+      include: { questions: true, module: { select: { course_id: true } } },
     });
 
     if (!lesson) {
@@ -134,44 +339,46 @@ export class LessonsService {
       throw new BadRequestException('Lesson is not a quiz');
     }
 
-    let score = 0;
-    const incorrectQuestions: { questionId: string; correctAnswer: number }[] = [];
-    const questionMap = new Map(lesson.questions.map((q) => [q.id, q]));
+    const { score, incorrectQuestions } = this.gradeQuiz(lesson.questions, answers);
+    const total = lesson.questions.length;
+    const passed = total > 0 && score / total >= PASS_THRESHOLD;
 
-    for (const ans of answers) {
-      const dbQuestion = questionMap.get(ans.questionId);
-      if (dbQuestion) {
-        if (dbQuestion.correct_option === ans.answer) {
-          score++;
-        } else {
-          incorrectQuestions.push({
-            questionId: dbQuestion.id,
-            correctAnswer: dbQuestion.correct_option,
-          });
-        }
-      }
-    }
+    const result = await this.prisma.$transaction(async (tx) => {
+      const attempt = await tx.quizAttempt.create({
+        data: {
+          tenant_id: tenantId,
+          student_id: studentId,
+          lesson_id: lessonId,
+          score,
+          total,
+          answers: answers as unknown as Prisma.InputJsonValue,
+          source: 'offline',
+          external_id: clientId,
+        },
+      });
 
-    // Store attempt with offline metadata
-    const attempt = await this.prisma.quizAttempt.create({
-      data: {
-        tenant_id: tenantId,
-        student_id: studentId,
-        lesson_id: lessonId,
-        score,
-        total: lesson.questions.length,
-        answers: answers as unknown as Prisma.InputJsonValue,
-        source: 'offline',
-        external_id: clientId,
-      },
+      const completion = await this.propagateCompletion(
+        tx,
+        tenantId,
+        studentId,
+        lessonId,
+        lesson.module_id,
+        lesson.module.course_id,
+        passed,
+      );
+
+      return { attempt, completion };
     });
 
     return {
-      attemptId: attempt.id,
+      attemptId: result.attempt.id,
       score,
-      total: lesson.questions.length,
+      total,
       incorrectQuestions,
       duplicateSync: false,
+      lessonCompleted: result.completion.lessonCompleted,
+      moduleCompleted: result.completion.moduleCompleted,
+      courseCompleted: result.completion.courseCompleted,
     };
   }
 }

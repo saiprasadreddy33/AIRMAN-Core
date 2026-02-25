@@ -57,6 +57,23 @@ export class BookingsService {
     return existing != null;
   }
 
+  private async hasInstructorAvailability(
+    tenantId: string,
+    instructorId: string,
+    startTime: Date,
+    endTime: Date,
+  ): Promise<boolean> {
+    const availability = await this.prisma.instructorAvailability.findFirst({
+      where: {
+        tenant_id: tenantId,
+        instructor_id: instructorId,
+        start_time: { lte: startTime },
+        end_time: { gte: endTime },
+      },
+    });
+    return availability != null;
+  }
+
   private validateTimeSlot(startTime: Date, endTime: Date) {
     if (startTime >= endTime) {
       throw new BadRequestException('Start time must be before end time');
@@ -106,6 +123,7 @@ export class BookingsService {
       include: BOOKING_INCLUDE,
     });
     await this.cache.invalidateBookings(tenantId);
+    await this.cache.invalidateAvailability(tenantId);
     return updated;
   }
 
@@ -119,6 +137,10 @@ export class BookingsService {
     },
   ) {
     this.validateTimeSlot(data.start_time, data.end_time);
+
+    if (!(await this.hasInstructorAvailability(tenantId, data.instructor_id, data.start_time, data.end_time))) {
+      throw new BadRequestException('INSTRUCTOR_NOT_AVAILABLE');
+    }
 
     if (await this.hasInstructorOverlap(tenantId, data.instructor_id, data.start_time, data.end_time)) {
       throw new ConflictException('INSTRUCTOR_ALREADY_BOOKED');
@@ -138,6 +160,7 @@ export class BookingsService {
     });
 
     await this.cache.invalidateBookings(tenantId);
+    await this.cache.invalidateAvailability(tenantId);
     this.notifications.notifyBookingRequested(this.buildNotifyPayload(booking));
     return booking;
   }
@@ -191,6 +214,10 @@ export class BookingsService {
     userId?: string,
     role?: string,
   ) {
+    const key = this.cache.bookingsKey(tenantId, page, limit);
+    const cached = await this.cache.get<{ data: unknown[]; total: number; page: number; limit: number }>(key);
+    if (cached) return cached;
+
     const roleFilter =
       role === 'student'
         ? { student_id: userId }
@@ -212,7 +239,9 @@ export class BookingsService {
       this.prisma.booking.count({ where }),
     ]);
 
-    return { data, total, page, limit };
+    const result = { data, total, page, limit };
+    await this.cache.set(key, result);
+    return result;
   }
 
   async findOne(tenantId: string, id: string) {
