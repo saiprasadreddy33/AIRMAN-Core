@@ -53,7 +53,11 @@ export class AvailabilityController {
     @Req() req: AuthUser,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+    @Query('instructorId') instructorId?: string,
   ) {
+    if (instructorId) {
+      return this.availability.findByInstructor(req.user.tenant_id, instructorId, page, limit);
+    }
     return this.availability.findByTenant(req.user.tenant_id, page, limit);
   }
 

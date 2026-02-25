@@ -19,7 +19,7 @@ export class LessonsController {
   }
 
   @Post(':id/attempt')
-  @Roles('admin', 'instructor', 'student')
+  @Roles('student')
   async attemptQuiz(
     @Param('id') id: string,
     @Body() dto: { answers: QuizAnswerInput[] },
@@ -37,15 +37,16 @@ export class LessonsController {
    * Endpoint to sync offline quiz attempts
    * Handles duplicate detection and validation
    */
-  @Post('sync-attempt')
-  @Roles('admin', 'instructor', 'student')
+  @Post(':id/sync-attempt')
+  @Roles('student')
   async syncOfflineAttempt(
-    @Body() dto: { lessonId: string; answers: QuizAnswerInput[]; clientId: string },
+    @Param('id') id: string,
+    @Body() dto: { lessonId?: string; answers: QuizAnswerInput[]; clientId: string },
     @Req() req: { user: { tenant_id: string; user_id: string } },
   ) {
     return this.lessonsService.syncOfflineAttempt(
       req.user.tenant_id,
-      dto.lessonId,
+      dto.lessonId || id,
       req.user.user_id,
       dto.answers,
       dto.clientId,

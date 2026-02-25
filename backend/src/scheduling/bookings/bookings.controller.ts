@@ -27,14 +27,14 @@ export class BookingsController {
 
   @Post()
   @Throttle({ global: { ttl: 60_000, limit: 10 } })
-  @Roles('admin', 'instructor', 'student')
+  @Roles('student')
   create(
     @Body() dto: CreateBookingDto,
     @Req() req: AuthUser,
   ) {
     return this.bookings.create(req.user.tenant_id, {
       instructor_id: dto.instructor_id,
-      student_id: dto.student_id ?? req.user.user_id,
+      student_id: req.user.user_id,
       start_time: new Date(dto.start_time),
       end_time: new Date(dto.end_time),
     });
